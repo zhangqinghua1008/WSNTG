@@ -2,29 +2,29 @@ import argparse
 import os
 from pathlib import Path
 import sys
-
 sys.path.append(str(Path(__file__).parent.parent))
-
 import pandas as pd
 from skimage.io import imread, imsave
 from joblib import Parallel, delayed
-
 from utils_network.metrics import *
 
+'''
+    根据推理出的图片，和原图进行比较得出数据.
+'''
+
 parser = argparse.ArgumentParser()
-parser.add_argument('pred_root')
+parser.add_argument('-pred_root',default=r"G:\py_code\pycharm_Code\WESUP-TGCN\records\20210827-1036-PM\output")
 args = parser.parse_args()
 
-glas_root = Path('~/data/GLAS_all').expanduser()
-pred_root = Path(args.pred_root).expanduser()
-new_pred_root = pred_root.parent / (pred_root.name + '-new')
+glas_root = Path(r'G:\py_code\pycharm_Code\WESUP-TGCN\data_glas')
+pred_root = Path(args.pred_root)
+new_pred_root = pred_root.parent / 'evaluate-new'
 if not new_pred_root.exists():
     new_pred_root.mkdir()
     (new_pred_root / 'testA').mkdir()
     (new_pred_root / 'testB').mkdir()
 
-executor = Parallel(n_jobs=os.cpu_count())
-
+executor = Parallel(n_jobs=os.cpu_count())  # 并行化计算
 
 def postprocess(pred):
     regions = label(pred)
@@ -69,21 +69,29 @@ def compute_metrics(predictions, gts, pred_paths):
     return df
 
 
-print('Test A')
+print('Test A ===========')
 
 print('\nReading predictions and gts ...')
-pred_paths = sorted((pred_root / 'testA').glob('*.bmp'))
-predictions = executor(delayed(postprocess)(imread(str(pred_path)) / 255) for pred_path in pred_paths)
-gts = executor(delayed(imread)(gt_path) for gt_path in sorted((glas_root / 'testA' / 'masks').glob('*.bmp')))
+pred_paths = sorted((pred_root / 'testB').glob('*.png'))
+# predictions = executor(delayed(postprocess)(imread(str(pred_path)) / 255) for pred_path in pred_paths)
+gt_paths = sorted((glas_root / 'testB' / 'masks').glob('*.bmp'))
+# gts = executor(delayed(imread)(gt_path) for gt_path in gt_paths)
+predictions = []
+for pred_path in pred_paths:
+    predictions.append(postprocess(imread(str(pred_path)) / 255) )
 
-print('Saving new predictions ...')
+gts = []
+for gt_path in sorted((glas_root / 'testB' / 'masks').glob('*.bmp')):
+    gts.append(imread(gt_path))
+
+print('Saving new predictions 保存新预测 ...')
 for pred, pred_path in zip(predictions, pred_paths):
-    imsave(new_pred_root / 'testA' / pred_path.name, (pred * 255).astype('uint8'))
+    imsave(new_pred_root / 'testB' / pred_path.name, (pred * 255).astype('uint8'))
 
 metrics = compute_metrics(predictions, gts, pred_paths)
 metrics.to_csv(pred_root / 'testA.csv')
 
-print('\nTest B')
+print('\nTest B ===========')
 
 print('\nReading predictions and gts ...')
 pred_paths = sorted((pred_root / 'testB').glob('*.bmp'))

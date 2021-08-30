@@ -90,7 +90,7 @@ def _generate_points(mask, point_ratio=1e-4): # point_ratio 是点比例
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser('Dot annotation generator. 点注释生成器。')
-    parser.add_argument('-r','--root_dir', type=str, default=r"G:\py_code\pycharm_Code\WESUP——修改版本\data_glas\train",
+    parser.add_argument('-r','--root_dir', type=str, default=r"G:\py_code\pycharm_Code\WESUP-TGCN\data_glas\train",
                         help='带掩码级注释的数据根目录的路径')
     parser.add_argument('-p', '--point-ratio', type=float, default=3e-5,  # 参数用于控制已标记像素的百分比。default=1e-4
                         help='Percentage of labeled objects (regions) for each class')  # 每个类标记对象(区域)的百分比
