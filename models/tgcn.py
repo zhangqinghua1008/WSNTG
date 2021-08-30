@@ -1,4 +1,3 @@
-import os
 from functools import partial
 
 import numpy as np
@@ -10,8 +9,6 @@ from torchvision import models
 
 from utils_network import empty_tensor
 from utils_network import is_empty_tensor
-from utils_network.data import Digest2019PointDataset
-from utils_network.data import PointSupervisionDataset
 from utils_network.data import SegmentationDataset
 from .base import BaseConfig, BaseTrainer
 
@@ -19,7 +16,6 @@ from .base import BaseConfig, BaseTrainer
 def _preprocess_superpixels(segments, mask=None, epsilon=1e-7):
     """Segment superpixels of a given image and return segment maps and their labels.
         给定图像的分段超像素，并return 分段映射(segment maps)及其标签。
-
     Args:
         segments: slic segments tensor with shape (H, W)   (H,W)大小的slic分割张量,每个像素一个超像素的编号（slic segments tensor）
         mask (optional): annotation mask tensor with shape (C, H, W). Each pixel is a one-hot
@@ -28,43 +24,42 @@ def _preprocess_superpixels(segments, mask=None, epsilon=1e-7):
     Returns:
         sp_maps: superpixel maps with shape (N, H, W)
         sp_labels: superpixel labels with shape (N_l, C), where N_l is the number of labeled samples.
-
         sp_maps: 具有形状(N, H, W)的超像素映射
         sp_labels: 具有形状(N_l, C)的超像素标签，其中N_l为已标记样本的数量。
     """
-
     # ordering of superpixels  获取所有的超像素标签（就是1...n，共n个超像素）
     sp_idx_list = segments.unique()
 
+    # mask存在，说明为点监督 或 全监督
     if mask is not None and not is_empty_tensor(mask):
         def compute_superpixel_label(sp_idx):
             sp_mask = (mask * (segments == sp_idx).long()).float()
             return sp_mask.sum(dim=(1, 2)) / (sp_mask.sum() + epsilon)   # epsilon 避免出现0的情况
 
-        # compute labels for each superpixel  计算每个超像素的标签-》 [0,1]之间的一个值
+        # compute labels for each superpixel  计算每个超像素的标签 -> [0,1]之间的一个值
         sp_labels = torch.cat([
             compute_superpixel_label(sp_idx).unsqueeze(0)
             for sp_idx in range(segments.max() + 1)
         ])  # sp_labels shape: [sp_N, 2] ,sp_N 是超像素个数, 代表超像素为每一类的概率
 
         # move labeled superpixels to the front of `sp_idx_list` 将带标签的超像素移到' sp_idx_list '的前面
-        labeled_sps = (sp_labels.sum(dim=-1) > 0).nonzero().flatten()
-        unlabeled_sps = (sp_labels.sum(dim=-1) == 0).nonzero().flatten()
+        labeled_sps = (sp_labels.sum(dim=-1) > 0).nonzero(as_tuple=False).flatten()  # 列表,包含已经标注的超像素的id
+        unlabeled_sps = (sp_labels.sum(dim=-1) == 0).nonzero(as_tuple=False).flatten()
         sp_idx_list = torch.cat([labeled_sps, unlabeled_sps])
 
         # quantize superpixel labels (e.g., from (0.7, 0.3) to (1.0, 0.0))
         # 量化超像素标签(例如，从(0.7,0.3)到(1.0,0.0))
-        sp_labels = sp_labels[labeled_sps]
-        sp_labels = (sp_labels == sp_labels.max(
-            dim=-1, keepdim=True)[0]).float()
+        sp_labels = sp_labels[labeled_sps]   # 拿到已标注的超像素标签
+        sp_labels = (sp_labels == sp_labels.max(dim=-1, keepdim=True)[0]).float()
+
     else:  # no supervision provided  没有提供监督
         sp_labels = empty_tensor().to(segments.device)
 
     # stacking normalized superpixel segment maps 叠加归一化超像素段映射
     sp_maps = segments == sp_idx_list[:, None, None]
-    sp_maps = sp_maps.squeeze().float()
+    sp_maps = sp_maps.squeeze().float()  # size: (S_N,W,H)
 
-    # make sure each superpixel map sums to one  确保每个超像素映射和为1
+    # make sure each superpixel map sums to one  确保每个超像素映射和为1.  之前超像素每个像素标签都是1，此时所有像素标签sum为1
     sp_maps = sp_maps / sp_maps.sum(dim=(1, 2), keepdim=True)
 
     return sp_maps, sp_labels
@@ -72,14 +67,12 @@ def _preprocess_superpixels(segments, mask=None, epsilon=1e-7):
 
 def _cross_entropy(y_hat, y_true, class_weights=None, epsilon=1e-7):
     """Semi-supervised cross entropy loss function. 半监督交叉熵损失函数。
-
     Args:
         y_hat: prediction tensor with size (N, C), where C is the number of classes 预测张量,size:(N, C)，C是类的数量
         y_true: label tensor with size (N, C). A sample won't be counted into loss
             if its label is all zeros.    标注张量,size:(N, C)。如果它的标签全是0,样本不会计入损失
         class_weights: class weights tensor with size (C,)  具有大小(C，)的类权张量
         epsilon: numerical stability term   数值稳定的术语
-
     Returns:
         cross_entropy: cross entropy loss computed only on samples with labels  交叉熵损失仅对带有标签的样本进行计算
     """
@@ -102,66 +95,17 @@ def _cross_entropy(y_hat, y_true, class_weights=None, epsilon=1e-7):
 
     return torch.sum(ce) / labeled_samples
 
-# 标签扩散
-def _label_propagate(features, y_l, threshold=0.95):
-    """Perform random walk based label propagation with similarity graph.
-       利用相似图进行基于随机游走的标签传播。
-
-    Arguments:
-        features: features of size (N, D), where N is the number of superpixels
-            and D is the dimension of input features
-        y_l: label tensor of size (N, C), where C is the number of classes
-        threshold: similarity threshold for label propagation
-
-        features: 特征的大小(N, D)，其中N是超像素的数量,D是输入特征的维数
-        y_l: 大小为(N, C)的标记张量，其中C为类的数目
-        threshold: 标签传播的相似阈值
-    Returns:
-        pseudo_labels: propagated label tensor of size (N, C)
-        pseudo_labels:  大小(N, C)的传播标号张量
-    """
-
-    # disable gradient computation  禁用梯度计算
-    features = features.detach()
-    y_l = y_l.detach()
-
-    # number of labeled and unlabeled samples  贴有标签和未贴有标签的样品数量
-    n_l = y_l.size(0)
-    n_u = features.size(0) - n_l
-
-    # feature affinity matrix  特征关联矩阵
-    W = torch.exp(-torch.einsum('ijk,ijk->ij',
-                                features - features.unsqueeze(1),
-                                features - features.unsqueeze(1)))
-
-    # sub-matrix of W containing similarities between labeled and unlabeled samples
-    # W的子矩阵包含标记和未标记样品之间的相似性
-    W_ul = W[n_l:, :n_l]
-
-    # max_similarities is the maximum similarity for each unlabeled sample
-    # src_indexes is the respective labeled sample index
-    # max_similarity是每个未标记样本的最大相似度,Src_indexes是各自标记的样本索引
-    max_similarities, src_indexes = W_ul.max(dim=1)
-
-    # initialize y_u with zeros  用零初始化y_u
-    y_u = torch.zeros(n_u, y_l.size(1)).to(y_l.device)
-
-    # only propagate labels if maximum similarity is above the threshold
-    # 仅在最大相似度超过阈值时传播标签
-    propagated_samples = max_similarities > threshold
-    y_u[propagated_samples] = y_l[src_indexes[propagated_samples]]
-
-    return y_u
-
 
 class TGCNConfig(BaseConfig):
-    """Configuration for TGCN model. 为WESUP模型配置 """
+    """Configuration for TGCN model. 为TGCN型配置 """
 
     # Rescale factor to subsample input images. 重新缩放因子的子样本输入图像。
-    rescale_factor = 0.5
+    # rescale_factor = 0.5
+    rescale_factor = 1   #zqh
 
     # multi-scale range for training  多尺度范围训练
-    multiscale_range = (0.3, 0.4)
+    # multiscale_range = (0.3, 0.4)
+    multiscale_range = (0.4, 0.6)  # zqh
 
     # Number of target classes.
     n_classes = 2
@@ -170,7 +114,7 @@ class TGCNConfig(BaseConfig):
     class_weights = (3, 1)
 
     # Superpixel parameters.
-    sp_area = 200
+    sp_area = 50   # 50 / 200
     sp_compactness = 40
 
     # whether to enable label propagation  是否启用标签传播
@@ -193,12 +137,14 @@ class TGCNConfig(BaseConfig):
     batch_size = 1
     epochs = 300
 
+    lr = 1e-5
+
 
 class TGCN(nn.Module):
     """Weakly supervised histopathology image segmentation with sparse point annotations."""
 
     def __init__(self, n_classes=2, D=32, **kwargs):
-        """Initialize a WESUP model.
+        """Initialize a TGCN model.
         Kwargs:
             n_classes: number of target classes (default to 2)
             D: output dimension of superpixel features 超像素特征的输出维度
@@ -256,7 +202,6 @@ class TGCN(nn.Module):
             第三个参数是该module的输出，其类型是tensor。注意输入和输出的类型是不一样的，切记。
             此函数：hook函数负责将获取的输入输出添加到feature列表中
         '''
-
         if self.feature_maps is None:
             self.fm_size = (input_[0].size(2), input_[0].size(3))
             side_conv_name = 'side_conv0'
@@ -284,7 +229,6 @@ class TGCN(nn.Module):
         Returns:
             pred: prediction with size (1, H, W)
         """
-
         x, sp_maps = x
         n_superpixels, height, width = sp_maps.size()  # n_superpixels:超像素个数, height,width 高,宽
 
@@ -319,9 +263,153 @@ class TGCN(nn.Module):
         return out_z
 
 
+class TGCNTrainer(BaseTrainer):
+    """Trainer for TGCN."""
+
+    def __init__(self, model, **kwargs):
+        """Initialize a WESUPTrainer instance.
+
+        Kwargs:
+            rescale_factor: rescale factor to subsample input images 重新缩放因子的子样本输入图像
+            multiscale_range: multi-scale range for training 多尺度范围的训练
+            class_weights: class weights for cross-entropy loss function 交叉熵损失函数的权重
+            sp_area: area of each superpixel 每个超像素的面积
+            sp_compactness: compactness parameter of SLIC SLIC紧实度参数
+            enable_propagation: whether to enable label propagation 是否启用标签传播
+            propagate_threshold: threshold for label propagation 标号传播阈值
+            propagate_weight: weight for label-propagated samples in loss function 损失函数中标签传播样本的权重
+            momentum: SGD momentum
+            weight_decay: weight decay for optimizer
+            freeze_backbone: whether to freeze backbone
+
+        Returns:
+            trainer: a new WESUPTrainer instance
+        """
+        config = TGCNConfig()
+        if config.freeze_backbone:
+            # 冻结主干网络，默认不冻结
+            for param in model.backbone.parameters():
+                param.requires_grad = False
+        kwargs = {**config.to_dict(), **kwargs}  # 把设置和命令行参数全都放到 kwargs下
+        super().__init__(model, **kwargs)        # 执行 BaseTrainer的 init方法
+
+        # cross-entropy loss function 叉损失函数
+        self.xentropy = partial(_cross_entropy)  # 偏函数，这里没附加参数，所以类似换个名称而已
+
+    def get_default_dataset(self, root_dir, train=True, proportion=1.0):
+        if train:
+            # if os.path.exists(os.path.join(root_dir, 'points')):
+            #     return PointSupervisionDataset(root_dir, proportion=proportion,
+            #                                   multiscale_range=self.kwargs.get('multiscale_range'))
+                # return Digest2019PointDataset(root_dir, proportion=proportion,
+                #                               multiscale_range=self.kwargs.get('multiscale_range'))
+            return SegmentationDataset(root_dir, proportion=proportion,
+                                       multiscale_range=self.kwargs.get('multiscale_range'))
+        return SegmentationDataset(root_dir, rescale_factor=self.kwargs.get('rescale_factor'), train=False)
+
+    def get_default_optimizer(self):
+        optimizer = torch.optim.SGD(
+            filter(lambda p: p.requires_grad, self.model.parameters()),
+            lr=5e-4,  # lr=5e-5,
+            # lr=(self.kwargs.get('lr'),5e-5),
+            momentum=self.kwargs.get('momentum'),
+            weight_decay=self.kwargs.get('weight_decay'),)
+        scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
+            optimizer, 'min', patience=10, factor=0.5, min_lr=1e-5, verbose=True)
+
+        return optimizer, None
+
+    # 预处理,包含超像素分割等  img(1(batch_size),3,W,H)   point_mask/pixel_mask: (1,2(类别),W,H)
+    def preprocess(self, *data):
+        data = [datum.to(self.device) for datum in data]
+        if len(data) == 3:   # 点标注信息时
+            img, pixel_mask, point_mask = data
+        elif len(data) == 2:
+            img, pixel_mask = data
+            point_mask = empty_tensor()
+        elif len(data) == 1:
+            img, = data
+            point_mask = empty_tensor()
+            pixel_mask = empty_tensor()
+        else:
+            raise ValueError('Invalid input data for WESUP')
+
+        # SLIC 超像素分割
+        segments = slic(
+            img.squeeze().cpu().numpy().transpose(1, 2, 0),
+            n_segments=int(img.size(-2) * img.size(-1) /    # n_segments: 分割输出图像中标签的(近似)数目。
+                           self.kwargs.get('sp_area')),
+            compactness=self.kwargs.get('sp_compactness'),
+        )
+        segments = torch.as_tensor(
+            segments, dtype=torch.long, device=self.device)
+
+        if point_mask is not None and not is_empty_tensor(point_mask):   # 如果点标签存在,点标注就是 mask, 即为点标注模式
+            mask = point_mask.squeeze()
+        elif pixel_mask is not None and not is_empty_tensor(pixel_mask): # 无点标签,则像素mask标注就是 mask, 即为全监督模式
+            mask = pixel_mask.squeeze()
+        else:
+            mask = None
+
+        # 超像素预处理
+        sp_maps, sp_labels = _preprocess_superpixels(
+            segments, mask, epsilon=self.kwargs.get('epsilon'))
+
+        # img_size(1,3(3通道),W,H),sp_maps_size(SP_Number,W,H)
+        # pixel_mask (1,C(分类数),W,H),  sp_labels(SP_Number,C)
+        return (img, sp_maps), (pixel_mask, sp_labels)
+
+    # 计算TGCN的损失
+    def compute_loss(self, pred, target, metrics=None):
+        '''
+            target=(pixel_mask,sp_labels)
+            pixel_mask (1,C(分类数),W,H),  sp_labels(SP_Number,C)  '''
+        _, sp_labels = target
+
+        # sp_features = self.model.sp_features  # self.model = TGCN,之前标签传递要用到。现在用不到。
+        sp_pred = self.model.sp_pred
+
+        if sp_pred is None:
+            raise RuntimeError('You must run a forward pass before computing loss. 在计算损失之前，必须进行前向传递')
+
+        # 超像素的总数
+        total_num = sp_pred.size(0)
+
+        # number of labeled superpixels 标记的超像素数
+        labeled_num = sp_labels.size(0)
+
+        if labeled_num < total_num: # weakly-supervised mode  weakly-supervised模式(点注释模式)
+            loss = self.xentropy(sp_pred[:labeled_num], sp_labels)   # 只取已标注的超像素进行loss计算
+            if metrics is not None and isinstance(metrics, dict):
+                metrics['labeled_sp_ratio'] = labeled_num / total_num    # 已标注的超像素比例
+        else:  # fully-supervised mode 全监督模式
+            loss = self.xentropy(sp_pred, sp_labels)
+
+        # clear outdated superpixel prediction 清除过时的超像素预测
+        self.model.sp_pred = None
+
+        return loss
+
+    def postprocess(self, pred, target=None):
+        pred = pred.round().long()  # round(): 返回一个新张量，将pred张量每个元素舍入到最近的整数
+        if target is not None:
+            return pred, target[0].argmax(dim=1)
+        return pred
+
+    def post_epoch_hook(self, epoch):
+        if self.scheduler is not None:
+            labeled_loss = np.mean(self.tracker.history['loss'])
+
+            # only adjust learning rate according to loss of labeled examples
+            # 仅根据标记样例的丢失情况来调整学习率
+            if 'propagate_loss' in self.tracker.history:
+                labeled_loss -= np.mean(self.tracker.history['propagate_loss'])
+
+            self.scheduler.step(labeled_loss)
+
+
 class TGCNPixelInference(TGCN):
-    """Weakly supervised histopathology image segmentation with sparse point annotations.
-        稀疏点标注的弱监督组织病理图像分割。 """
+    """Weakly supervised histopathology image segmentation with sparse point annotations."""
 
     def __init__(self, n_classes=2, D=32, **kwargs):
         """Initialize a TGCN model.
@@ -329,9 +417,8 @@ class TGCNPixelInference(TGCN):
             n_classes: number of target classes (default to 2)
             D: output dimension of superpixel features
         Returns:
-            model: a new WESUP model
+            model: a new TGCN model
         """
-
         super().__init__()
 
         self.kwargs = kwargs
@@ -404,159 +491,3 @@ class TGCNPixelInference(TGCN):
 
         return x.view(height, width, -1)
 
-
-class TGCNTrainer(BaseTrainer):
-    """Trainer for TGCN."""
-
-    def __init__(self, model, **kwargs):
-        """Initialize a WESUPTrainer instance.
-
-        Kwargs:
-            rescale_factor: rescale factor to subsample input images 重新缩放因子的子样本输入图像
-            multiscale_range: multi-scale range for training 多尺度范围的训练
-            class_weights: class weights for cross-entropy loss function 交叉熵损失函数的权重
-            sp_area: area of each superpixel 每个超像素的面积
-            sp_compactness: compactness parameter of SLIC SLIC紧实度参数
-            enable_propagation: whether to enable label propagation 是否启用标签传播
-            propagate_threshold: threshold for label propagation 标号传播阈值
-            propagate_weight: weight for label-propagated samples in loss function 损失函数中标签传播样本的权重
-            momentum: SGD momentum
-            weight_decay: weight decay for optimizer
-            freeze_backbone: whether to freeze backbone
-
-        Returns:
-            trainer: a new WESUPTrainer instance
-        """
-        config = TGCNConfig()
-        if config.freeze_backbone:
-            # 冻结主干网络，默认不冻结
-            for param in model.backbone.parameters():
-                param.requires_grad = False
-        kwargs = {**config.to_dict(), **kwargs}  # 把设置和命令行参数全都放到 kwargs下
-        super().__init__(model, **kwargs)        # 执行 BaseTrainer的 init方法
-
-        # cross-entropy loss function 叉损失函数
-        self.xentropy = partial(_cross_entropy)  # 偏函数，这里没附加参数，所以类似换个名称而已
-
-    def get_default_dataset(self, root_dir, train=True, proportion=1.0):
-        if train:
-            if os.path.exists(os.path.join(root_dir, 'points')):
-                return PointSupervisionDataset(root_dir, proportion=proportion,
-                                              multiscale_range=self.kwargs.get('multiscale_range'))
-                # return Digest2019PointDataset(root_dir, proportion=proportion,
-                #                               multiscale_range=self.kwargs.get('multiscale_range'))
-            return SegmentationDataset(root_dir, proportion=proportion,
-                                       multiscale_range=self.kwargs.get('multiscale_range'))
-        return SegmentationDataset(root_dir, rescale_factor=self.kwargs.get('rescale_factor'), train=False)
-
-    def get_default_optimizer(self):
-        optimizer = torch.optim.SGD(
-            filter(lambda p: p.requires_grad, self.model.parameters()),
-            lr=5e-5,
-            momentum=self.kwargs.get('momentum'),
-            weight_decay=self.kwargs.get('weight_decay'),)
-        scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
-            optimizer, 'min', patience=10, factor=0.5, min_lr=1e-5, verbose=True)
-
-        return optimizer, None
-
-    # 预处理,包含超像素分割等
-    def preprocess(self, *data):
-        data = [datum.to(self.device) for datum in data]
-        if len(data) == 3:
-            img, pixel_mask, point_mask = data
-        elif len(data) == 2:
-            img, pixel_mask = data
-            point_mask = empty_tensor()
-        elif len(data) == 1:
-            img, = data
-            point_mask = empty_tensor()
-            pixel_mask = empty_tensor()
-        else:
-            raise ValueError('Invalid input data for WESUP')
-
-        # SLIC 超像素分割
-        segments = slic(
-            img.squeeze().cpu().numpy().transpose(1, 2, 0),
-            n_segments=int(img.size(-2) * img.size(-1) /    # n_segments: 分割输出图像中标签的(近似)数目。
-                           self.kwargs.get('sp_area')),
-            compactness=self.kwargs.get('sp_compactness'),
-        )
-        segments = torch.as_tensor(
-            segments, dtype=torch.long, device=self.device)
-
-        if point_mask is not None and not is_empty_tensor(point_mask):
-            mask = point_mask.squeeze()
-        elif pixel_mask is not None and not is_empty_tensor(pixel_mask):
-            mask = pixel_mask.squeeze()
-        else:
-            mask = None
-
-        sp_maps, sp_labels = _preprocess_superpixels(
-            segments, mask, epsilon=self.kwargs.get('epsilon'))
-
-        # img_size(1,3(3通道),W,H),sp_maps_size(SP_Number,W,H)
-        # pixel_mask (1,C(分类数),W,H),  sp_labels(SP_Number,C)
-        return (img, sp_maps), (pixel_mask, sp_labels)
-
-    # 计算wesup的损失
-    '''
-        target=(pixel_mask,sp_labels) 
-        pixel_mask (1,C(分类数),W,H),  sp_labels(SP_Number,C)
-    '''
-    def compute_loss(self, pred, target, metrics=None):
-        _, sp_labels = target
-
-        sp_features = self.model.sp_features  # self.model = TGCN
-        sp_pred = self.model.sp_pred
-
-        if sp_pred is None:
-            raise RuntimeError('You must run a forward pass before computing loss. 在计算损失之前，必须进行前向传递')
-
-        # 超像素的总数
-        total_num = sp_pred.size(0)
-
-        # number of labeled superpixels 标记的超像素数
-        labeled_num = sp_labels.size(0)
-
-        if labeled_num < total_num:
-            # weakly-supervised mode  weakly-supervised模式
-            loss = self.xentropy(sp_pred[:labeled_num], sp_labels)
-
-            if self.kwargs.get('enable_propagation'):   # 是否能够标签传递
-                propagated_labels = _label_propagate(sp_features, sp_labels,
-                                                     threshold=self.kwargs.get('propagate_threshold'))
-
-                propagate_loss = self.xentropy(
-                    sp_pred[labeled_num:], propagated_labels)
-                loss += self.kwargs.get('propagate_weight') * propagate_loss
-
-            if metrics is not None and isinstance(metrics, dict):
-                metrics['labeled_sp_ratio'] = labeled_num / total_num
-                if self.kwargs.get('enable_propagation'):
-                    metrics['propagated_labels'] = propagated_labels.sum().item()
-                    metrics['propagate_loss'] = propagate_loss.item()
-        else:  # fully-supervised mode 全监督模式
-            loss = self.xentropy(sp_pred, sp_labels)
-
-        # clear outdated superpixel prediction 清除过时的超像素预测
-        self.model.sp_pred = None
-
-        return loss
-
-    def postprocess(self, pred, target=None):
-        pred = pred.round().long()  # round(): 返回一个新张量，将pred张量每个元素舍入到最近的整数
-        if target is not None:
-            return pred, target[0].argmax(dim=1)
-        return pred
-
-    def post_epoch_hook(self, epoch):
-        if self.scheduler is not None:
-            labeled_loss = np.mean(self.tracker.history['loss'])
-
-            # only adjust learning rate according to loss of labeled examples
-            # 仅根据标记样例的丢失情况来调整学习率
-            if 'propagate_loss' in self.tracker.history:
-                labeled_loss -= np.mean(self.tracker.history['propagate_loss'])
-
-            self.scheduler.step(labeled_loss)

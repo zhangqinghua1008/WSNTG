@@ -41,11 +41,9 @@ class BaseTrainer(ABC):
 
     def __init__(self, model, **kwargs):
         """Initialize a BaseTrainer.
-
         Args:
             model: a model for training (should be a `torch.nn.Module`)
             kwargs (optional): additional configuration
-
         Returns:
             trainer: a new BaseTrainer instance
         """
@@ -85,7 +83,6 @@ class BaseTrainer(ABC):
 
     def get_default_optimizer(self):
         """Get default optimizer for training.
-
         Returns:
             optimizer: default model optimizer
             scheduler: default learning rate scheduler (could be `None`)
@@ -96,16 +93,12 @@ class BaseTrainer(ABC):
     def preprocess(self, *data):
         """Preprocess data from dataloaders and return model inputs and targets.
             预处理来自数据加载器的数据，并返回模型输入和目标。
-
         Args:
             *data: data returned from dataloaders  从数据加载器返回的数据
-
         Returns:
             input: input to feed into the model of size (B, H, W)  输入输入尺寸模型(B, H, W)
-            target: desired output (or any additional information) to compute loss
-                and evaluate performance
+            target: desired output (or any additional information) to compute loss and evaluate performance
         """
-
         return [datum.to(self.device) for datum in data]
 
     @abstractmethod
@@ -184,19 +177,19 @@ class BaseTrainer(ABC):
         return pred
 
     def train_one_iteration(self, phase, *data):
-        """Hook for training one iteration.  训练一个迭代
-
+        """Hook for training one iteration.  训练一个迭代 / 训练一个batch
         Args:
             phase: either 'train' or 'val'
             *data: input data
         """
-        # 预处理，在相应的模型文件中执行
+        # 预处理，在相应的模型py文件中执行
         input_, target = self.preprocess(*data)
 
         self.optimizer.zero_grad()
         metrics = dict()
 
-        with torch.set_grad_enabled(phase == 'train'):  # .set_grad_enabled(Bool)用于将梯度计算设置成打开或者关闭的上下文管理器.
+        # .set_grad_enabled(Bool): 将梯度计算设置成打开或者关闭的上下文管理器.
+        with torch.set_grad_enabled(phase == 'train'):
             pred = self.model(input_)
             if phase == 'train':
                 loss = self.compute_loss(pred, target, metrics=metrics)
@@ -210,11 +203,11 @@ class BaseTrainer(ABC):
                 self.optimizer.step()
 
         pred, target = self.postprocess(pred, target)  # 后处理
+        # 先执行self.evaluate(pred, target),然后把返回的参数 和 现有的metrics 进行合并, 进而传给step
         self.tracker.step({**metrics, **self.evaluate(pred, target)})
 
     def train_one_epoch(self, no_val=False):
         """Hook for training one epoch.  Hook为训练一个时代
-
         Args:
             no_val: whether to disable validation 是否禁用验证
         """
@@ -246,11 +239,9 @@ class BaseTrainer(ABC):
 
     def post_epoch_hook(self, epoch):
         """Hook for post-epoch stage.
-
         Args:
             epoch: current epoch
         """
-
         pass
 
     # 开始培训过程 ★★★★★
@@ -269,13 +260,11 @@ class BaseTrainer(ABC):
             proportion: proportion of training data to be used 使用的训练数据的比例
         """
 
-        # Merge configurations. 合并配置
-        self.kwargs = {**self.kwargs, **kwargs}
+        self.kwargs = {**self.kwargs, **kwargs}  # Merge configurations. 合并配置
 
         self.optimizer, self.scheduler = self.get_default_optimizer()
         self.load_checkpoint(self.kwargs.get('checkpoint'))  # checkpoint 一般为Nne
-        self.logger.addHandler(logging.FileHandler(
-            self.record_dir / 'train.log'))
+        self.logger.addHandler(logging.FileHandler(self.record_dir / 'train.log'))
         serializable_kwargs = {                 # serializable 可串行化的
             k: v for k, v in self.kwargs.items()
             if isinstance(v, (int, float, str, tuple))
@@ -289,10 +278,10 @@ class BaseTrainer(ABC):
         train_path = data_root / 'train'  # 拼接
         val_path = data_root / 'val'
 
+        # 加载train数据
         train_dataset = self.get_default_dataset(train_path,
                                                  proportion=self.kwargs.get('proportion', 1))
         train_dataset.summary(logger=self.logger)  # 使用logger记录数据集信息
-
         self.dataloaders = {
             'train': torch.utils.data.DataLoader(
                 train_dataset,
@@ -309,6 +298,7 @@ class BaseTrainer(ABC):
                 num_workers=os.cpu_count())
 
         self.logger.info(underline('\nTraining Stage', '='))
+
         self.metric_funcs = self.kwargs.get('metrics')    #度量函数
 
         epochs = self.kwargs.get('epochs')
@@ -323,7 +313,6 @@ class BaseTrainer(ABC):
 
             # save metrics to csv file 保存度量到CSV文件
             self.tracker.save()
-
             # save learning curves 保存学习曲线
             record.plot_learning_curves(self.tracker.save_path)
 
