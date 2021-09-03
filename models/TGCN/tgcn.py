@@ -11,7 +11,7 @@ from utils_network import empty_tensor
 from utils_network import is_empty_tensor
 from utils_network.data import SegmentationDataset
 from utils_network.data import PointSupervisionDataset
-from .base import BaseConfig, BaseTrainer
+from base import BaseConfig, BaseTrainer
 
 
 def _preprocess_superpixels(segments, mask=None, epsilon=1e-7):
@@ -101,8 +101,8 @@ class TGCNConfig(BaseConfig):
     """Configuration for TGCN model. 为TGCN型配置 """
 
     # Rescale factor to subsample input images. 重新缩放因子的子样本输入图像。
-    rescale_factor = 0.5
-    # rescale_factor = 1   #zqh
+    # rescale_factor = 0.5
+    rescale_factor = 1   #zqh
 
     # multi-scale range for training  多尺度范围训练
     # multiscale_range = (0.3, 0.4)
@@ -115,7 +115,7 @@ class TGCNConfig(BaseConfig):
     class_weights = (3, 1)
 
     # Superpixel parameters.
-    sp_area = 150   # 50 / 200
+    sp_area = 50   # 50 / 200
     sp_compactness = 40
 
     # whether to enable label propagation  是否启用标签传播
@@ -138,7 +138,7 @@ class TGCNConfig(BaseConfig):
     batch_size = 1
     epochs = 300
 
-    lr = 1e-4
+    lr = 7e-5
 
 
 class TGCN(nn.Module):
