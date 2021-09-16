@@ -11,7 +11,10 @@ from utils_network import empty_tensor
 from utils_network import is_empty_tensor
 from utils_network.data import SegmentationDataset
 from utils_network.data import PointSupervisionDataset
-from base import BaseConfig, BaseTrainer
+from models.base import BaseConfig, BaseTrainer
+
+from .gcn_layers import AdaptiveGraphConvolution
+from .gcn_layers import AdaptiveGraphRecursiveConvolution
 
 
 def _preprocess_superpixels(segments, mask=None, epsilon=1e-7):
@@ -96,17 +99,49 @@ def _cross_entropy(y_hat, y_true, class_weights=None, epsilon=1e-7):
 
     return torch.sum(ce) / labeled_samples
 
+# =========== 生成邻接矩阵
+# sp_features： （N,32）
+def _adj(sp_features):
+    # adj.size: (N,N)
+    low_features = sp_features[:,:16]
+    adj1 = torch.exp(-torch.einsum('ijk,ijk->ij',    # 爱因斯坦求和 （einsum）
+                                low_features - low_features.unsqueeze(1),
+                                low_features - low_features.unsqueeze(1)))
+    high_features = sp_features[:,16:]
+    adj2 = torch.exp(-torch.einsum('ijk,ijk->ij',  # 爱因斯坦求和 （einsum）
+                                   high_features - high_features.unsqueeze(1),
+                                   high_features - high_features.unsqueeze(1)))
+    return [adj1,adj2]
+
+# def smoothness_reg(gcn_out, adj_list, loss, reg_scalar):
+def smoothness_reg(gcn_out, adj_list):
+    loss = 0
+    for i in range(len(adj_list)):
+        # the first power of each graph in the list ...  maybe transform to Laplacian?
+        # 列表中每个图的第一次方…或者转换成拉普拉斯式?
+        # pre_trace_tensor= torch.matmul( torch.transpose(torch.matmul( adj_list[i][0],gcn_out)), gcn_out)
+        # pre_trace_tensor = reg_scalar*pre_trace_tensor
+        # pre_reg = torch.trace(pre_trace_tensor) / tf.cast(torch.shape(gcn_out)[0] * torch.shape(gcn_out)[1], 'float32')
+        # pre_reg = torch.trace(pre_trace_tensor) / torch.FloatTensor( gcn_out.size[0] * gcn_out.size[1] )
+
+        one = torch.matmul(gcn_out.t(), adj_list[i])
+        res = torch.matmul(one, gcn_out)
+        tr = torch.trace(res)
+        pre_reg = tr / float(gcn_out.size()[0] * gcn_out.size()[1])
+        loss+= pre_reg
+    return loss
+
 
 class TGCNConfig(BaseConfig):
     """Configuration for TGCN model. 为TGCN型配置 """
 
     # Rescale factor to subsample input images. 重新缩放因子的子样本输入图像。
-    # rescale_factor = 0.5
-    rescale_factor = 1   #zqh
+    rescale_factor = 0.5
+    # rescale_factor = 1   #zqh
 
     # multi-scale range for training  多尺度范围训练
     # multiscale_range = (0.3, 0.4)
-    multiscale_range = (0.4, 0.6)  # zqh
+    multiscale_range = (0.4, 0.4)  # zqh
 
     # Number of target classes.
     n_classes = 2
@@ -117,9 +152,6 @@ class TGCNConfig(BaseConfig):
     # Superpixel parameters.
     sp_area = 50   # 50 / 200
     sp_compactness = 40
-
-    # whether to enable label propagation  是否启用标签传播
-    enable_propagation = True
 
     # Weight for label-propagated samples when computing loss function 计算损时 标签传播样本的权重
     propagate_threshold = 0.8
@@ -135,10 +167,16 @@ class TGCNConfig(BaseConfig):
     freeze_backbone = False
 
     # Training configurations.
-    batch_size = 1
+    batch_size = 4
     epochs = 300
 
-    lr = 7e-5
+    lr = 1e-4
+
+    is_gcn = True
+    # Weight for TGCN  when computing loss function 计算损失时 tgcn的正则化loss权重
+    # 'reg_scalar', 1e-05, 'Weight of smoothness regularizer.')  # 平滑权值正则化器
+    # gcn_smooth_reg_weight = 1e-05   # 平滑度调整
+    gcn_smooth_reg_weight = 1e-04   # 平滑度调整
 
 
 class TGCN(nn.Module):
@@ -183,13 +221,30 @@ class TGCN(nn.Module):
             nn.Softmax(dim=1)
         )
 
+        # ============================= 图网络初始化
+        self.gcn_nfeat = D
+        self.gcn_nhid = D*2
+        self.adj_len = 2
+        self.gcn_out_dim = 2
+        self.gc1 = AdaptiveGraphConvolution(in_features_dim  = self.gcn_nfeat,
+                                            out_features_dim = self.gcn_nhid,
+                                            len = self.adj_len, bias=True)
+        self.gc2 = AdaptiveGraphRecursiveConvolution(in_features_dim=self.gcn_nhid,
+                                                     net_input_dim=self.gcn_nfeat,
+                                                     out_features_dim=self.gcn_out_dim,
+                                                     len = self.adj_len, bias=True)
+        self.dropout = 0.8      # 图网络dropout 比例
+        self.gcn_output = None  # 图网络output
+        self.adj_list = None
+        # ============================= =============================
+
         # store conv feature maps 存储conv特性映射
         self.feature_maps = None
 
         # spatial size of first feature map 第一个特征图的空间大小
         self.fm_size = None
 
-        # label propagation input features 标签传播输入特性
+        # label propagation input features 标签传播输入特性. (超像素特征)
         self.sp_features = None
 
         # superpixel predictions (tracked to compute loss) 超像素预测(跟踪以计算损失
@@ -245,7 +300,22 @@ class TGCN(nn.Module):
 
         # 利用全连通层降低超像素特征维数 reduce superpixel feature dimensions with fully connected layers
         x = self.fc_layers(x)       # reduce,得到size(N ,D),D=32
-        self.sp_features = x
+        self.sp_features = x       # 得到超像素特征
+
+        # TGCN =============
+        if self.kwargs.get('is_gcn'):
+            adj_list = _adj(self.sp_features)    # 获得adj列表
+            self.adj_list = adj_list
+
+            # gcnx = F.dropout(self.sp_features , self.dropout, training=self.training)
+            g1 = F.relu( self.gc1(self.sp_features, adj_list) )
+            g1 = F.dropout(g1, self.dropout, training=self.training)
+            g2 = self.gc2(g1, self.sp_features, adj_list)
+            gcn_out = F.softmax(g2, dim=1)
+            # gcn_out = F.log_softmax(g2, dim=1)
+            # gcn_out = torch.nn.functional.sigmoid(g2)
+            self.gcn_output = gcn_out
+        # ========================
 
         # classify each superpixel  每个superpixel分类
         self.sp_pred = self.classifier(x)  # Size: [N, 2]
@@ -385,8 +455,20 @@ class TGCNTrainer(BaseTrainer):
         else:  # fully-supervised mode 全监督模式
             loss = self.xentropy(sp_pred, sp_labels)
 
+        # TGCN 正则化损失
+        if self.kwargs.get('is_gcn'):
+            gcn_out = self.model.gcn_output
+            tgcn_loss = smoothness_reg(gcn_out, self.model.adj_list )
+            regloss = self.kwargs.get('gcn_smooth_reg_weight') * tgcn_loss
+            # self.logger.info( '正则化损失：',regloss.item())
+            loss += regloss
+
         # clear outdated superpixel prediction 清除过时的超像素预测
         self.model.sp_pred = None
+
+        # clear outdated superpixel prediction 清除过时的超像素预测
+        self.model.gcn_output = None
+        self.model.adj_list = None
 
         return loss
 
@@ -451,6 +533,23 @@ class TGCNPixelInference(TGCN):
             nn.Softmax(dim=1)
         )
 
+        # ============================= 图网络初始化
+        self.gcn_nfeat = D
+        self.gcn_nhid = D*2
+        self.adj_len = 2
+        self.gcn_out_dim = 2
+        self.gc1 = AdaptiveGraphConvolution(in_features_dim  = self.gcn_nfeat,
+                                            out_features_dim = self.gcn_nhid,
+                                            len = self.adj_len, bias=True)
+        self.gc2 = AdaptiveGraphRecursiveConvolution(in_features_dim=self.gcn_nhid,
+                                                     net_input_dim=self.gcn_nfeat,
+                                                     out_features_dim=self.gcn_out_dim,
+                                                     len = self.adj_len, bias=True)
+        self.dropout = 0.8      # 图网络dropout 比例
+        self.gcn_output = None  # 图网络output
+        self.adj_list = None
+        # ============================= =============================
+
         # store conv feature maps 存储conv特性映射
         self.feature_maps = None
 
@@ -487,7 +586,32 @@ class TGCNPixelInference(TGCN):
         _ = self.backbone(x)
         x = self.feature_maps
         x = x.view(x.size(0), -1)
-        x = self.classifier(self.fc_layers(x.t()))
+        x = self.fc_layers(x.t())
+
+        if self.kwargs.get('is_gcn'):
+            sp_features = x
+            adj_list = _adj(sp_features)    # 获得adj列表
+            self.adj_list = adj_list
+
+            # gcnx = F.dropout(self.sp_features , self.dropout, training=self.training)
+            g1 = F.relu( self.gc1(sp_features, adj_list) )
+            g1 = F.dropout(g1, self.dropout, training=self.training)
+            g2 = self.gc2(g1, sp_features, adj_list)
+            gcn_out = F.softmax(g2, dim=1)
+            # gcn_out = F.log_softmax(g2, dim=1)
+            # gcn_out = torch.nn.functional.sigmoid(g2)
+            self.gcn_output = gcn_out
+        # ========================
+
+        x = self.classifier(x)
 
         return x.view(height, width, -1)
+
+        # self.feature_maps = None
+        # _ = self.backbone(x)
+        # x = self.feature_maps
+        # x = x.view(x.size(0), -1)
+        # x = self.classifier(self.fc_layers(x.t()))
+        #
+        # return x.view(height, width, -1)
 

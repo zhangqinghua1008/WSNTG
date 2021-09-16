@@ -67,13 +67,15 @@ if __name__ == '__main__':
     # infer 参数
     is_infer = True  # 是否infer,只有第一次test时infer
     model_type = 'tgcn'
-    checkpoint = Path(r"G:\py_code\pycharm_Code\WESUP-TGCN\records\20210829-0817-PM\checkpoints\ckpt.0400.pth")
+    checkpoint = Path(r"G:\py_code\pycharm_Code\WESUP-TGCN\records\20210909-0531-PM\checkpoints\ckpt.0300.pth")
     glas_root = Path(r'..\data_glas')  # 数据地址
 
     infer_scales = (0.5,)   # 默认(0.5,)  ps:0.8/0.7的时候越差, 0.6时候最好
 
     # 根据推理出的图片进行比较
     output = checkpoint.parent / 'output'
+    if not output.exists():
+        output.mkdir()
     output = output / f'results-SuperPixel-{str(infer_scales)}'
     if not output.exists():
         output.mkdir()

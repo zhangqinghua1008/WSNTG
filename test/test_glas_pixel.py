@@ -3,7 +3,6 @@ from pathlib import Path
 
 import pandas as pd
 from joblib import Parallel, delayed
-from skimage.io import imread, imsave
 from tqdm import tqdm
 from PIL import Image
 from skimage.io import imread, imsave
@@ -11,10 +10,8 @@ import torch.nn.functional as F
 import torchvision.transforms.functional as TF
 
 # ========= infer 推理
-import infer
-from models import initialize_trainer
 from utils_network.metrics import *
-from models.tgcn import TGCNPixelInference
+from TGCN.tgcn import TGCNPixelInference
 
 '''
     TGCN, 像素级别推理，并根据推理出的图片，和原图进行比较得出评价指标.
@@ -107,14 +104,15 @@ if __name__ == '__main__':
     # infer 参数
     is_infer = True  # 是否infer,只有第一次test时infer
     model_type = 'tgcn'
-    checkpoint = Path(r"G:\py_code\pycharm_Code\WESUP-TGCN\records\20210829-0817-PM\checkpoints\ckpt.0400.pth")
+    checkpoint = Path(r"G:\py_code\pycharm_Code\WESUP-TGCN\records\20210902-1106-PM\checkpoints\ckpt.0300.pth")
     glas_root = Path(r'..\data_glas')  # 数据地址
 
-    infer_scales = (0.5,)   # 默认(0.5,)  ps:0.8/0.7的时候越差, 0.6时候最好
+    infer_scales = (0.5,)   # 默认(0.5,)  ps:0.8/0.7的时候越差,
 
     # 根据推理出的图片进行比较
-    output = checkpoint.parent / 'output'
-    output = output / f'results-pixel-{str(infer_scales)}'
+    output_dir = checkpoint.parent / 'output'
+    if not output_dir.exists(): output_dir.mkdir()
+    output = output_dir / f'results-pixel-{str(infer_scales)}'
     if not output.exists():
         output.mkdir()
 
@@ -151,7 +149,7 @@ if __name__ == '__main__':
         gt_paths = sorted((glas_root / phase / 'masks').glob('*.bmp'))
         gts = executor(delayed(imread)(gt_path) for gt_path in gt_paths)
 
-        print(f'保存后处理后的预测 ... {phases} 的测试结果：')
+        print(f'保存后处理后的预测 ... {phase} 的测试结果：')
         for pred, pred_path in zip(predictions, pred_paths):
             imsave(new_pred_root / phase / pred_path.name, (pred * 255).astype('uint8'))
 
