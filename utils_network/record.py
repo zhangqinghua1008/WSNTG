@@ -13,6 +13,10 @@ import matplotlib
 import matplotlib.pyplot as plt
 import pandas as pd
 
+import skimage.io as io
+import torch
+from torchvision import utils as vutils
+
 matplotlib.use('Agg')
 
 # 主备记录路径
@@ -20,7 +24,8 @@ def prepare_record_dir():
     """Create new record directory and return its path. 创建新的记录目录并返回其路径 """
 
     # record_root = Path.home() / 'records'  # 系统用户目录 （cz源代码）
-    record_root = Path.cwd() / 'records'  # path.cwd() = 运行原始py文件的当前目录（不是该文件的原始目录）  .parent 父目录
+    # record_root = Path.cwd() / 'records'  # path.cwd() = 运行原始py文件的当前目录（不是该文件的原始目录）  .parent 父目录
+    record_root = Path('D:/组会内容/实验报告/TGCN/') / 'records'  # zqh, 存放recoder的地址
     if os.environ.get('RECORD_ROOT'):
         record_root = Path(os.environ.get('RECORD_ROOT')).expanduser()
 
@@ -42,7 +47,6 @@ def prepare_record_dir():
 def save_params(record_dir, params):
     """Save experiment parameters to record directory.
         保存实验参数到记录目录,保存为一个json文件  """
-
     params_dir = record_dir / 'params'
 
     if not params_dir.exists():
@@ -56,7 +60,8 @@ def save_params(record_dir, params):
 
 def copy_source_files(record_dir):
     """Copy all source scripts to record directory for reproduction.
-        复制所有源脚本到记录目录进行复制 """
+        复制所有源脚本到记录目录进行复制
+    """
 
     source_dir = record_dir / 'source'
     if source_dir.exists():
@@ -75,7 +80,6 @@ def plot_learning_curves(history_path):
     """Read history csv file and plot learning curves.
         读取历史csv文件，绘制学习曲线
     """
-
     history = pd.read_csv(history_path)
     record_dir = history_path.parent
     curves_dir = record_dir / 'curves'
@@ -86,7 +90,7 @@ def plot_learning_curves(history_path):
     for key in history.columns:
         if key.startswith('val_'):
             if key.replace('val_', '') not in history.columns:
-                # plot metrics computed only on validation phase
+                # plot metrics computed only on validation phase  plot度量仅在验证阶段
                 plt.figure(dpi=200)
                 plt.title('Model ' + key.replace('val_', ''))
                 plt.plot(history[key])
@@ -110,3 +114,16 @@ def plot_learning_curves(history_path):
         plt.grid(True)
         plt.savefig(curves_dir / f'{key}.png')
         plt.close()
+
+def save_preAndTarge(record_dir, pred, target ,index):
+    """Save experiment parameters to record directory.
+        保存实验参数到记录目录,保存为一个json文件  """
+    img_dir = record_dir / 'pre_output'
+
+    if not img_dir.exists():
+        img_dir.mkdir()
+
+    pred_save = pred.clone().detach().to(torch.device('cpu')).float()
+    target_save = target.clone().detach().to(torch.device('cpu')).float()
+    vutils.save_image(pred_save, Path.joinpath(img_dir,str(index) + ".bmp"))
+    vutils.save_image(target_save, Path.joinpath(img_dir,str(index) + "_mask.bmp"))
