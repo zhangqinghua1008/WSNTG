@@ -1,14 +1,11 @@
 """
-Metrics calculation utilities.  指标的计算工具。
-
+Metrics calculation utilities.  指标计算工具
 Code of `detection_f1`, `object_dice` and `object_hausdorff` are adapted from
 https://warwick.ac.uk/fac/sci/dcs/research/tia/glascontest/evaluation/evaluation_metrics_v6.zip.
 """
-
 import functools
-
-import numpy as np
 import torch
+import numpy as np
 from scipy import stats
 from scipy.spatial.distance import directed_hausdorff
 from skimage.measure import label
@@ -16,7 +13,8 @@ from skimage.measure import label
 
 def convert_to_numpy(func):
     """Decorator for converting each argument to numpy array.
-    修饰器，用于将每个参数转换为numpy数组。"""
+        修饰器，用于将每个参数转换为numpy数组
+    """
 
     @functools.wraps(func)
     def wrapper(*args):
@@ -28,9 +26,35 @@ def convert_to_numpy(func):
 
     return wrapper
 
+# DI
+def dice(S, G, epsilon=1e-7):
+    """Dice index for segmentation evaluation.  用于分割评价的骰子指数。(DI)
 
+    Arguments:
+        S: segmentation mask with shape (B, H, W)
+        G: ground truth mask with shape (B, H, W)
+        epsilon: numerical stability term
+
+    Returns:
+        dice_score: segmentation dice score
+    """
+
+    if torch.is_tensor(S) and torch.is_tensor(G):
+        S = S.unsqueeze(0) if len(S.size()) == 2 else S
+        G = G.unsqueeze(0) if len(G.size()) == 2 else G
+        S, G = S.float(), G.float()
+        dice_score = 2 * (G * S).sum(dim=(1, 2)) / (G.sum(dim=(1, 2)) + S.sum(dim=(1, 2)) + epsilon)
+        return dice_score.mean().item()
+
+    S, G = np.array(S), np.array(G)
+    S = np.expand_dims(S, 0) if len(S.shape) == 2 else S
+    G = np.expand_dims(G, 0) if len(G.shape) == 2 else G
+    dice_score = 2 * (G * S).sum(axis=(1, 2)) / (G.sum(axis=(1, 2)) + S.sum(axis=(1, 2)) + epsilon)
+    return dice_score.mean()
+
+#OA
 def accuracy(P, G):
-    """Classification accuracy.  分类精度
+    """Classification accuracy.
 
     Arguments:
         P: prediction with size (B, H, W)
@@ -44,10 +68,10 @@ def accuracy(P, G):
 
     return (np.array(P) == np.array(G)).mean()
 
-
+#F1
 @convert_to_numpy
 def detection_f1(S, G, overlap_threshold=0.5, epsilon=1e-7):
-    """F1-score for object detection.
+    """F1-score for object detection.  对象检测f1评分。
 
     The ground truth for each segmented object is the object in the manual annotation
     that has maximum overlap with that segmented object.
@@ -58,6 +82,9 @@ def detection_f1(S, G, overlap_threshold=0.5, epsilon=1e-7):
     less than 50% of its area overlapped by its corresponding segmented object will be
     considered as false negative.
 
+    每个分割对象的ground truth为人工标注的对象,它与被分割的物体有最大的重叠
+    与至少 50% 的地面实况相交的分段腺体对象将被视为真阳性，否则将被视为假阳性。
+    没有对应的分割对象或与对应的分割对象重叠的区域少于 50% 的真实腺体对象将被视为假阴性。
     See more on https://warwick.ac.uk/fac/sci/dcs/research/tia/glascontest/evaluation/.
 
     Arguments:
@@ -65,7 +92,6 @@ def detection_f1(S, G, overlap_threshold=0.5, epsilon=1e-7):
         G: ground truth mask with the same shape as S
         overlap_threshold: overlap threshold for counting true positives
         epsilon: numerical stability term
-
     Returns:
         f1: detection F1 score
     """
@@ -108,39 +134,11 @@ def detection_f1(S, G, overlap_threshold=0.5, epsilon=1e-7):
 
     return (2*precision*recall) / (precision + recall + epsilon)
 
-
-def dice(S, G, epsilon=1e-7):
-    """Dice index for segmentation evaluation.  用于分割评价的骰子指数。
-
-    Arguments:
-        S: segmentation mask with shape (B, H, W)
-        G: ground truth mask with shape (B, H, W)
-        epsilon: numerical stability term
-
-    Returns:
-        dice_score: segmentation dice score
-    """
-
-    if torch.is_tensor(S) and torch.is_tensor(G):
-        S = S.unsqueeze(0) if len(S.size()) == 2 else S
-        G = G.unsqueeze(0) if len(G.size()) == 2 else G
-        S, G = S.float(), G.float()
-        dice_score = 2 * (G * S).sum(dim=(1, 2)) / (G.sum(dim=(1, 2)) + S.sum(dim=(1, 2)) + epsilon)
-        return dice_score.mean().item()
-
-    S, G = np.array(S), np.array(G)
-    S = np.expand_dims(S, 0) if len(S.shape) == 2 else S
-    G = np.expand_dims(G, 0) if len(G.shape) == 2 else G
-    dice_score = 2 * (G * S).sum(axis=(1, 2)) / (G.sum(axis=(1, 2)) + S.sum(axis=(1, 2)) + epsilon)
-    return dice_score.mean()
-
-
+#OD
 @convert_to_numpy
 def object_dice(S, G):
-    """Object-level Dice index for segmentation evaluation.
-
+    """Object-level Dice(OD)  index for segmentation evaluation.  用于分割评价的对象级骰子索引(OD)
     See more on https://warwick.ac.uk/fac/sci/dcs/research/tia/glascontest/evaluation/.
-
     Arguments:
         S: segmentation mask with shape (H, W)
         G: ground truth mask with shape (H, W)
@@ -198,7 +196,7 @@ def object_dice(S, G):
 @convert_to_numpy
 def hausdorff(S, G):
     """Symmetric hausdorff distance for shape similarity evaluation.
-
+        形状相似度评价的对称hausdorff距离。
     Arguments:
         S: segmentation mask with shape (H, W)
         G: ground truth mask with shape (H, W)
@@ -220,11 +218,11 @@ def hausdorff(S, G):
 
     return max(directed_hausdorff(Sc, Gc)[0], directed_hausdorff(Gc, Sc)[0])
 
-
+#OH
 @convert_to_numpy
 def object_hausdorff(S, G):
-    """Object-level Hausdorff distance for shape similarity evaluation.
-
+    """Object-level Hausdorff(OH) distance for shape similarity evaluation.
+        形状相似度评价的目标级Hausdorff距离。
     See more on https://warwick.ac.uk/fac/sci/dcs/research/tia/glascontest/evaluation/.
 
     Arguments:
