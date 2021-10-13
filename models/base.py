@@ -176,9 +176,10 @@ class BaseTrainer(ABC):
             return pred, target
         return pred
 
-    def train_one_iteration(self, phase, *data):
+    def train_one_iteration(self, index,phase, *data):
         """Hook for training one iteration.  训练一个迭代 / 训练一个batch
         Args:
+            index: 代表第几个数据，用来保存中间结果
             phase: either 'train' or 'val'
             *data: input data
         """
@@ -203,6 +204,10 @@ class BaseTrainer(ABC):
                 self.optimizer.step()
 
         pred, target = self.postprocess(pred, target)  # 后处理
+
+        # 看index 保存
+        if index%10==0:
+            record.save_preAndTarge(self.record_dir,pred, target, index)  # 将实验参数保存到json
         # 先执行self.evaluate(pred, target),然后把返回的参数 和 现有的metrics 进行合并, 进而传给step
         self.tracker.step({**metrics, **self.evaluate(pred, target)})
 
@@ -226,9 +231,9 @@ class BaseTrainer(ABC):
 
             # self.dataloaders[phase]  = self.dataloaders['train'] or self.dataloaders['val']
             pbar = tqdm(self.dataloaders[phase])
-            for data in pbar:
+            for index,data in enumerate(pbar):   # 训练前这个地方需要加载，很慢，而且占用内存很多
                 try:
-                    self.train_one_iteration(phase, *data)
+                    self.train_one_iteration(index, phase, *data)
                 except RuntimeError as ex:
                     self.logger.exception(ex)
 
