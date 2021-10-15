@@ -2,7 +2,8 @@
 # @Time   : 2021/10/9 17:06
 # @Author : 张清华
 # @File   : testnet.py
-# @Note   :  为了测试一些模型的
+# @Note   :  将back-bone换成u-net形式尝试
+
 import os
 from functools import partial
 
@@ -21,10 +22,6 @@ from .base import BaseConfig, BaseTrainer
 
 import segmentation_models_pytorch as smp
 from model_utils.summary import summary
-
-# ----
-from importlib import import_module
-
 
 def _preprocess_superpixels(segments, mask=None, epsilon=1e-7):
     """Segment superpixels of a given image and return segment maps and their labels.
@@ -166,9 +163,9 @@ def _label_propagate(features, y_l, threshold=0.95):
     return y_u
 
 
-class TESTNETConfig(BaseConfig):
+class TEST_UNETConfig(BaseConfig):
     """Configuration for WESUP model. 为WESUP模型配置 """
-    net_info = "这是: TESTNET"
+    net_info = "这是: TEST_U-NET"
 
     # Rescale factor to subsample input images. 重新缩放因子的子样本输入图像。
     rescale_factor = 0.5
@@ -206,7 +203,7 @@ class TESTNETConfig(BaseConfig):
     lr = 5e-4
 
 
-class TESTNET(nn.Module):
+class TEST_UNET(nn.Module):
     """Weakly supervised histopathology image segmentation with sparse point annotations."""
 
     def __init__(self, n_classes=2, D=32, **kwargs):
@@ -219,7 +216,6 @@ class TESTNET(nn.Module):
         """
         super().__init__()
         self.kwargs = kwargs
-        # self.backbone = models.vgg16(pretrained=True).features
 
         self.backbone = smp.Unet(in_channels=3, classes=n_classes, encoder_name='vgg16',
                                 encoder_weights="imagenet")
@@ -233,7 +229,6 @@ class TESTNET(nn.Module):
                 setattr(self, f'side_conv{self.fm_channels_sum}',   # setattr(object, name, value) 函数指定对象的指定属性的值
                                 nn.Conv2d(layer.out_channels, layer.out_channels // 2, 1) )      # 指定side_conv{int} = Conv2d(64, 32, kernel_size=(1, 1), stride=(1, 1))
                 self.fm_channels_sum += layer.out_channels // 2
-
 
         # fully-connected layers for dimensionality reduction  全连接层降维
         self.fc_layers = nn.Sequential(
@@ -284,7 +279,6 @@ class TESTNET(nn.Module):
 
     def forward(self, x):
         """Running a forward pass.
-
         Args:
             x: a tuple containing input tensor of size (1, C, H, W) and
                 stacked superpixel maps with size (N, H, W)
@@ -293,7 +287,6 @@ class TESTNET(nn.Module):
         Returns:
             pred: prediction with size (1, H, W)
         """
-
         x, sp_maps = x
 
         n_superpixels, height, width = sp_maps.size()
@@ -302,7 +295,8 @@ class TESTNET(nn.Module):
         # extract conv feature maps and flatten 提取卷积特征图并flatten
         self.feature_maps = None
         _ = self.backbone(x)
-        x = self.feature_maps
+        # x = self.feature_maps  # size:(fm_channels_sum,H,W)
+        x = self.feature_maps[-33:-1, :, :]  # size:(32,H,W)
         x = x.view(x.size(0), -1)
 
         # calculate features for each superpixel 计算每个超像素的特征
@@ -311,7 +305,7 @@ class TESTNET(nn.Module):
 
         # reduce superpixel feature dimensions with fully connected layers
         # 利用全连通层降低超像素特征维数
-        x = self.fc_layers(x)
+        # x = self.fc_layers(x)
         self.sp_features = x
 
         # classify each superpixel  每个superpixel分类
@@ -330,7 +324,7 @@ class TESTNET(nn.Module):
         return pred.unsqueeze(0)[..., 1]
 
 
-class TESTNETTrainer(BaseTrainer):
+class TEST_UNETTrainer(BaseTrainer):
     """Trainer for TESTNET."""
 
     def __init__(self, model, **kwargs):
@@ -353,7 +347,7 @@ class TESTNETTrainer(BaseTrainer):
             trainer: a new WESUPTrainer instance
         """
 
-        config = TESTNETConfig()
+        config = TEST_UNETConfig()
         if config.freeze_backbone:
             # 冻结主干网络，默认不冻结
             for param in model.backbone.parameters():
@@ -482,3 +476,9 @@ class TESTNETTrainer(BaseTrainer):
                 labeled_loss -= np.mean(self.tracker.history['propagate_loss'])
 
             self.scheduler.step(labeled_loss)
+
+
+# if __name__ == '__main__':
+#     model = TEST_UNET().cuda()
+#
+#     summary( model, (3,270,270) )
