@@ -29,12 +29,10 @@ def convert_to_numpy(func):
 # DI
 def dice(S, G, epsilon=1e-7):
     """Dice index for segmentation evaluation.  用于分割评价的骰子指数。(DI)
-
     Arguments:
         S: segmentation mask with shape (B, H, W)
         G: ground truth mask with shape (B, H, W)
         epsilon: numerical stability term
-
     Returns:
         dice_score: segmentation dice score
     """
@@ -277,3 +275,35 @@ def object_hausdorff(S, G):
             tilde_hausdorff_sum += tilde_omegai * min_distance
 
     return (hausdorff_sum + tilde_hausdorff_sum) / 2
+
+# ---------------------
+
+# IOU
+def iou_score(output, target):
+    smooth = 1e-5
+
+    if torch.is_tensor(output):
+        # output = torch.sigmoid(output).data.cpu().numpy()
+        output = torch.argmax(output, dim=1).data.cpu().numpy()
+    if torch.is_tensor(target):
+        target = target.data.cpu().numpy()
+    output_ = output > 0.5
+    target_ = target > 0.5
+    intersection = (output_ & target_).sum()
+    union = (output_ | target_).sum()
+
+    return (intersection + smooth) / (union + smooth)
+
+# DICE
+def dice_coef(output, target): #output为预测结果 target为真实结果
+    smooth = 1e-5
+
+    if torch.is_tensor(output):
+        output = torch.argmax(output, dim=1).data.cpu().numpy()
+    if torch.is_tensor(target):
+        target = target.data.cpu().numpy()
+
+    intersection = (output * target).sum()
+
+    return (2. * intersection + smooth) / \
+        (output.sum() + target.sum() + smooth)
