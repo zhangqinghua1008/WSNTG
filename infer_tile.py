@@ -1,5 +1,5 @@
 """
-Inference module for window-based strategy.
+Inference module for window-based strategy.  基于窗口策略的推理模块。
 """
 
 import math
@@ -21,8 +21,7 @@ from models import initialize_trainer
 
 
 def _get_top_left_coordinates(height, width, patch_size):
-    """Calculate coordinates of top-left corners for patches."""
-
+    """Calculate coordinates of top-left corners for patches. 计算补丁的左上角坐标"""
     n_h = math.ceil(height / patch_size)
     n_w = math.ceil(width / patch_size)
     tops = np.linspace(0, height - patch_size, n_h, dtype=int)
@@ -34,7 +33,7 @@ def _get_top_left_coordinates(height, width, patch_size):
 def divide_image_to_patches(img, patch_size):
     """
     Divide a large image (mask) to patches with (possibly overlapping) tile strategy.
-
+    用(可能是重叠的)tile策略将一个大图像(mask)分割成patch。
     Args:
         img: input image of shape (H, W, 3)
         patch_size: target size of patches
@@ -57,7 +56,7 @@ def divide_image_to_patches(img, patch_size):
 
 
 def combine_patches_to_image(patches, target_height, target_width):
-    """Combine patches back to a single image (mask).
+    """Combine patches back to a single image (mask). 将patch组合成单一图像(mask)
 
     Args:
         patches: predicted patches of shape (N, H, W, C) or (N, H, W)
@@ -76,8 +75,8 @@ def combine_patches_to_image(patches, target_height, target_width):
     if len(patches.shape) == 3:  # channel dimension is missing
         patches = np.expand_dims(patches, -1)
 
-    # The last channel is the number of overlapping patches for a given pixel,
-    # used for averaging predictions from multiple windows.
+    # The last channel is the number of overlapping patches for a given pixel, 最后一个通道是给定像素的重叠补丁数，
+    # used for averaging predictions from multiple windows.                   用于平均来自多个窗口的预测
     combined = np.zeros((target_height, target_width, patches.shape[-1] + 1))
 
     for top, left in coordinates:
@@ -92,7 +91,7 @@ def combine_patches_to_image(patches, target_height, target_width):
 
 
 def predict(trainer, img_path, patch_size, device='cpu'):
-    """Predict on a single input image.
+    """Predict on a single input image.  预测单一输入图像。
 
     Arguments:
         trainer: trainer for inference
@@ -103,7 +102,6 @@ def predict(trainer, img_path, patch_size, device='cpu'):
     Returns:
         predictions: list of model predictions of size (H, W)
     """
-
     img = imread(img_path)
     patches = divide_image_to_patches(img, patch_size)
     predictions = []
@@ -128,7 +126,6 @@ def save_predictions(predictions, img_paths, output_dir='predictions'):
         img_paths: list of paths to input images
         output_dir: path to output directory
     """
-
     print(f'\nSaving prediction to {output_dir} ...')
 
     if not osp.exists(output_dir):
@@ -141,8 +138,9 @@ def save_predictions(predictions, img_paths, output_dir='predictions'):
 
 
 def infer(trainer, data_dir, patch_size, output_dir=None, device='cpu'):
-    """Making inference on a directory of images with given model checkpoint."""
-
+    """Making inference on a directory of images with given model checkpoint.
+        对给定模型检查点的图像目录进行推理。
+    """
     if output_dir is not None and not osp.exists(output_dir):
         os.mkdir(output_dir)
 
@@ -161,8 +159,13 @@ def infer(trainer, data_dir, patch_size, output_dir=None, device='cpu'):
     return predictions
 
 
-def main(data_dir, model_type='mild', patch_size=464, checkpoint=None,
+def main(data_dir="", model_type='mild', patch_size=464, checkpoint=None,
          output_dir=None, device=None):
+
+    data_dir = r"D://组会内容//data//Digestpath2019//test"
+    checkpoint = r"D:\组会内容\实验报告\TGCN\records\20211022-0309-PM\checkpoints/ckpt.0040.pth"
+    model_type = 'wesup'
+    patch_size = 256
 
     if output_dir is None and checkpoint is not None:
         checkpoint = Path(checkpoint).expanduser()
