@@ -23,7 +23,7 @@ def infer(trainer,data_dir,patch_size,resize_size=None,device='cuda',output_dir=
             save_pre(pre, img_path, output_dir + "/_post")
 
 
-def main():
+def run():
     data_dir = r"D:\组会内容\data\Digestpath2019\MedT\test/"
     checkpoint = r"D:\组会内容\实验报告\MedT\records\20211106-1339-PM\checkpoints/ckpt.0054.pth"
     model_type = 'wesup'
@@ -45,4 +45,4 @@ def main():
     lable_dir = r"D:\组会内容\data\Digestpath2019\MedT\test\labelcol"
     performance_metrics(pre_dir,lable_dir)
 
-main()
+run()
