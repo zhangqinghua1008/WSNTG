@@ -55,6 +55,6 @@ def performance_metrics(pre_dir,lable_dir):
 
 if __name__ == '__main__':
     # pre_dir = r"D:\组会内容\实验报告\MedT\records\Digestpath_WSI_results_new20"
-    pre_dir = r"D:\组会内容\实验报告\MedT\records\Digestpath_WSI_results_new20"
+    pre_dir = r"D:\组会内容\实验报告\MedT\records\Digestpath_WSI_results_WESUP\temp\_pre"
     lable_dir = r"D:\组会内容\data\Digestpath2019\MedT\test\labelcol"
     performance_metrics(pre_dir,lable_dir)

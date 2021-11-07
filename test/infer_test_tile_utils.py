@@ -22,6 +22,8 @@ import fire
 from tqdm import tqdm
 from PIL import Image
 from skimage.io import imread
+from skimage import measure
+from skimage import color
 
 def preprocess(device,*data):
     return [datum.to(device) for datum in data]
@@ -107,36 +109,7 @@ def combine_patches_to_image(patches, target_height, target_width):
     return np.squeeze(combined[..., :-1])
 
 
-def predict(trainer, img_path, patch_size, device='cpu'):
-    """Predict on a single input image.  预测单一输入图像。
-    Arguments:
-        trainer: trainer for inference
-        img_path: instance of `torch.utils.data.Dataset`
-        patch_size: patch size when feeding into network
-        device: target device
-    Returns:
-        predictions: list of model predictions of size (H, W)
-    """
-    img = imread(img_path)
-    patches = divide_image_to_patches(img, patch_size)
-    predictions = []
-
-    for patch in patches:
-        # infer 单个patch
-        input_ = TF.to_tensor(Image.fromarray(patch)).to(device).unsqueeze(0)
-        # input_, _ = trainer.preprocess(input_)
-        # prediction = trainer.postprocess(trainer.model(input_))
-        # prediction = prediction.detach().cpu().numpy()
-        # 测试用
-        prediction = np.ones_like((1,1,input_.shape[2],input_.shape[2]))
-        predictions.append(prediction[..., np.newaxis])
-
-    predictions = np.concatenate(predictions)
-
-    return combine_patches_to_image(predictions, img.shape[0], img.shape[1])
-
-
-def predict_bigimg(trainer, img_path, patch_size, device='cpu'):
+def predict_bigimg(trainer, img_path, patch_size, resize_size=None,device='cpu'):
     """Predict on a single input image.  预测单一输入图像。
     Arguments:
         trainer: trainer for inference
@@ -152,12 +125,19 @@ def predict_bigimg(trainer, img_path, patch_size, device='cpu'):
     predictions = []
 
     for patch in tqdm(patches,ncols=50):
+        if resize_size:
+            patch = resize_img(patch, (resize_size, resize_size))  # resize 成特定大小
+
         # infer 单个patch
         input_ = TF.to_tensor(Image.fromarray(patch)).to(device).unsqueeze(0)
         # prediction = model(input_)
         input_, _ = trainer.preprocess(input_)  # w
         prediction = trainer.postprocess(trainer.model(input_))
-        prediction = prediction.detach().cpu().numpy()
+        prediction = prediction.detach().cpu().numpy().astype('uint8')
+
+        if resize_size:
+            prediction = resize_mask(prediction, (1,patch_size, patch_size))  # 恢复到patch_size 大小
+
         # 测试用
         predictions.append(prediction[..., np.newaxis])
 
@@ -207,29 +187,31 @@ def save_predictions(predictions, img_paths, output_dir='predictions'):
         Image.fromarray(pred * 255).save(osp.join(output_dir, img_name))
 
 
-def infer(trainer, data_dir, patch_size, output_dir=None, device='cpu'):
-    """Making inference on a directory of images with given model checkpoint.
-        对给定模型检查点的图像目录进行推理。 """
-
-    if output_dir is not None and not osp.exists(output_dir):
-        os.mkdir(output_dir)
-
-    data_dir = Path(data_dir)
-    img_paths = list((data_dir / 'images').iterdir())
-
-    print(f'Predicting {len(img_paths)} images from {data_dir} ...')
-    predictions = [
-        predict(trainer, img_path, patch_size, device=device)
-        for img_path in tqdm(img_paths,ncols=50)
-    ]
-
-    if output_dir is not None:
-        save_predictions(predictions, img_paths, output_dir)
-
-    return predictions
-
-
 from skimage.transform import resize
 def resize_img(img, target_size):
     img = resize(img, target_size, order=1, anti_aliasing=False)
     return (img * 255).astype('uint8')
+
+def resize_mask(mask, target_size):
+    mask = (mask * 255).astype('uint8')
+    mask = resize(mask, target_size, order=1, anti_aliasing=False)
+    mask = (mask * 255).astype('uint8')
+    mask[ mask < 127] = 0
+    mask[ mask > 127 ] = 1
+    return mask
+
+
+def pred_postprocess(pred, threshold=10000):
+    regions = measure.label(pred)
+    for region_idx in range(regions.max() + 1):
+        region_mask = regions == region_idx
+        if region_mask.sum() < threshold:
+            pred[region_mask] = 0
+
+    revert_regions = measure.label(255 - pred)
+    for region_idx in range(revert_regions.max() + 1):
+        region_mask = revert_regions == region_idx
+        if region_mask.sum() < threshold:
+            pred[region_mask] = 255
+    return pred
+
