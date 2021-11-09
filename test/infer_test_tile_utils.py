@@ -138,12 +138,43 @@ def predict_bigimg(trainer, img_path, patch_size, resize_size=None,device='cpu')
         if resize_size:
             prediction = resize_mask(prediction, (1,patch_size, patch_size))  # 恢复到patch_size 大小
 
-        # 测试用
         predictions.append(prediction[..., np.newaxis])
 
     predictions = np.concatenate(predictions)
 
     return combine_patches_to_image(predictions, img.shape[0], img.shape[1])
+
+def pixel_predict_bigimg(model, img_path, patch_size, resize_size=None,device='cpu'):
+    """
+        WESUP像素级推测
+    Returns:
+        predictions: list of model predictions of size (H, W)
+    """
+    img = imread(img_path)
+    patches = divide_image_to_patches(img, patch_size)
+    predictions = []
+
+    # for patch in tqdm(patches,ncols=70):
+    for patch in patches:
+        if resize_size:
+            patch = resize_img(patch, (resize_size, resize_size))  # resize 成特定大小
+
+        # infer 单个patch
+        input_ = TF.to_tensor(Image.fromarray(patch)).to(device).unsqueeze(0)
+        prediction = model(input_)
+        prediction = prediction.unsqueeze(0).detach().cpu().numpy()[..., 1]
+        # prediction = prediction.detach().cpu().numpy().astype('uint8')
+
+        if resize_size:
+            prediction = resize_mask(prediction, (1,patch_size, patch_size))  # 恢复到patch_size 大小
+
+        # predictions.append(np.expand_dims(prediction, 0))
+        predictions.append(prediction[..., np.newaxis])
+
+    predictions = np.concatenate(predictions)
+
+    return combine_patches_to_image(predictions, img.shape[0], img.shape[1])
+
 
 
 def save_pre(predictions, img_paths, output_dir='predictions'):
@@ -202,6 +233,7 @@ def resize_mask(mask, target_size):
 
 
 def pred_postprocess(pred, threshold=10000):
+    # 执行像素级后处理时候很慢，后续改进一下; 以改进：fast_pred_postprocess
     regions = measure.label(pred)
     for region_idx in range(regions.max() + 1):
         region_mask = regions == region_idx
@@ -214,4 +246,27 @@ def pred_postprocess(pred, threshold=10000):
         if region_mask.sum() < threshold:
             pred[region_mask] = 255
     return pred
+
+
+def fast_pred_postprocess(pred, threshold=10000):
+    #  快速后处理。
+    regions = measure.label(pred)
+    props = measure.regionprops(regions)
+    resMatrix = np.zeros(regions.shape)
+    for i in range(0, len(props)):
+        if props[i].area > threshold:
+            tmp = (regions == i + 1).astype(np.uint8)
+            resMatrix += tmp  # 组合所有符合条件的连通域
+    resMatrix *= 255
+
+    #     去掉包含的杂点
+    revert_regions = measure.label(255 - resMatrix)
+    revert_props = measure.regionprops(revert_regions)
+    new_resMatrix = np.zeros(regions.shape)
+    for i in range(0, len(revert_props)):
+        if revert_props[i].area < threshold:
+            tmp = (revert_regions == i + 1).astype(np.uint8)
+            new_resMatrix += tmp  # 组合所有符合条件的连通域
+    new_resMatrix *= 255
+    return resMatrix + new_resMatrix
 
