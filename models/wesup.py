@@ -10,7 +10,7 @@ from torchvision import models
 
 from utils_network import empty_tensor
 from utils_network import is_empty_tensor
-from utils_network.data import Digest2019PointDataset
+from utils_network.data import Digest2019PointDataset,PointSupervisionDataset
 from utils_network.data import SegmentationDataset
 from .base import BaseConfig, BaseTrainer
 
@@ -113,7 +113,7 @@ def _label_propagate(features, y_l, threshold=0.95):
         threshold: similarity threshold for label propagation
 
         features: 特征的大小(N, D)，其中N是超像素的数量,D是输入特征的维数
-        y_l: 大小为(N, C)的标记张量，其中C为类的数目
+        y_l: 大小为(N_label, C)的标记张量，其中C为类的数目
         threshold: 标签传播的相似阈值
     Returns:
         pseudo_labels: propagated label tensor of size (N, C)
@@ -121,32 +121,34 @@ def _label_propagate(features, y_l, threshold=0.95):
     """
 
     # disable gradient computation  禁用梯度计算
-    features = features.detach()
-    y_l = y_l.detach()
+    features = features.detach()   # torch.Size([256, 32])
+    y_l = y_l.detach()             # torch.Size([23, 2])
 
     # number of labeled and unlabeled samples  贴有标签和未贴有标签的样品数量
     n_l = y_l.size(0)
     n_u = features.size(0) - n_l
 
     # feature affinity matrix  特征关联矩阵
-    W = torch.exp(-torch.einsum('ijk,ijk->ij',
+    # features - features.unsqueeze(1): size(N,N,D) torch.Size([256, 256, 32])
+    # W.size: (N,N), 即torch.Size([256, 256])
+    W = torch.exp(-torch.einsum('ijk,ijk->ij',    # 爱因斯坦求和 （einsum）
                                 features - features.unsqueeze(1),
                                 features - features.unsqueeze(1)))
 
     # sub-matrix of W containing similarities between labeled and unlabeled samples
-    # W的子矩阵包含标记和未标记样品之间的相似性
+    # W的子矩阵包含标记和未标记样品之间的相似性  ,W_ul: torch.Size([233, 23])  . 代表233个未标记样本和 23个已经标记样本之间的相似度
     W_ul = W[n_l:, :n_l]
 
-    # max_similarities is the maximum similarity for each unlabeled sample
     # src_indexes is the respective labeled sample index
-    # max_similarity是每个未标记样本的最大相似度,Src_indexes是各自标记的样本索引
+    # max_similarity是每个未标记样本的最大相似度,Src_indexes是各自标记的样本索引(就是每个样本对于最大的已标记样本的下标)
     max_similarities, src_indexes = W_ul.max(dim=1)
 
-    # initialize y_u with zeros  用零初始化y_u
+    # initialize y_u with zeros  用零初始化y_u,torch.Size([233, 2])
+    # y_u : 未标记像本的y
     y_u = torch.zeros(n_u, y_l.size(1)).to(y_l.device)
 
     # only propagate labels if maximum similarity is above the threshold
-    # 仅在最大相似度超过阈值时传播标签
+    # 仅在最大相似度超过阈值时传播标签 propagated_samples: torch.Size([233])
     propagated_samples = max_similarities > threshold
     y_u[propagated_samples] = y_l[src_indexes[propagated_samples]]
 
@@ -169,11 +171,12 @@ class WESUPConfig(BaseConfig):
     class_weights = (3, 1)
 
     # Superpixel parameters.
-    sp_area = 200
+    sp_area = 100
     sp_compactness = 40
 
     # whether to enable label propagation  是否启用标签传播
     enable_propagation = True
+    # enable_propagation = False
 
     # Weight for label-propagated samples when computing loss function 计算损时 标签传播样本的权重
     propagate_threshold = 0.8
@@ -190,7 +193,7 @@ class WESUPConfig(BaseConfig):
 
     # Training configurations.
     batch_size = 1
-    epochs = 300
+    epochs = 200
 
 
 class WESUP(nn.Module):
@@ -254,10 +257,14 @@ class WESUP(nn.Module):
         # superpixel predictions (tracked to compute loss) 超像素预测(跟踪以计算损失
         self.sp_pred = None
 
-    # hook（）函数是register_forward_hook()函数必须提供的参数
-    # hook函数需要三个参数，这三个参数是系统传给hook函数的，自己不能修改这三个参数：
-    # hook函数负责将获取的输入输出添加到feature列表中
+    # _hook_fn 函数是register_forward_hook()函数必须提供的参数. 当某一层被注册了hook之后,就会执行这个函数
     def _hook_fn(self, _, input_, output):
+        '''
+            用于处理feature的hook函数必须包含三个参数[module, fea_in, fea_out]，参数的名字可以自己起，但其意义是固定的。
+            第一个参数表示torch里的一个子module，比如Linear,Conv2d等，第二个参数是该module的输入，其类型是tuple；
+            第三个参数是该module的输出，其类型是tensor。注意输入和输出的类型是不一样的，切记。
+            此函数：hook函数负责将获取的输入输出添加到feature列表中
+        '''
         if self.feature_maps is None:
             self.fm_size = (input_[0].size(2), input_[0].size(3))
             side_conv_name = 'side_conv0'
@@ -276,7 +283,6 @@ class WESUP(nn.Module):
 
     def forward(self, x):
         """Running a forward pass.
-
         Args:
             x: a tuple containing input tensor of size (1, C, H, W) and
                 stacked superpixel maps with size (N, H, W)
@@ -285,7 +291,6 @@ class WESUP(nn.Module):
         Returns:
             pred: prediction with size (1, H, W)
         """
-
         x, sp_maps = x
         n_superpixels, height, width = sp_maps.size()
 
@@ -296,28 +301,28 @@ class WESUP(nn.Module):
         x = x.view(x.size(0), -1)
 
         # calculate features for each superpixel 计算每个超像素的特征
-        sp_maps = sp_maps.view(sp_maps.size(0), -1)
-        x = torch.mm(sp_maps, x.t())
+        sp_maps = sp_maps.view(sp_maps.size(0), -1)  # flatten,得到size(N,H*W)
+        x = torch.mm(sp_maps, x.t())                 # 矩阵相乘, 得到size(N,fm_channels_sum)  ps: x.t()转置
 
         # reduce superpixel feature dimensions with fully connected layers
         # 利用全连通层降低超像素特征维数
-        x = self.fc_layers(x)
-        self.sp_features = x
+        x = self.fc_layers(x)  # reduce,得到size(N ,D),D=32
+        self.sp_features = x   # 得到超像素特征
 
         # classify each superpixel  每个superpixel分类
-        self.sp_pred = self.classifier(x)
+        self.sp_pred = self.classifier(x)   # Size: [N, 2]
 
         # flatten sp_maps to one channel  将sp_maps Flatten到一个通道
-        sp_maps = sp_maps.view(n_superpixels, height, width).argmax(dim=0)
+        sp_maps = sp_maps.view(n_superpixels, height, width).argmax(dim=0)  # size:(H,W)
 
         # initialize prediction mask  初始化预测mask
-        pred = torch.zeros(height, width, self.sp_pred.size(1))
+        pred = torch.zeros(height, width, self.sp_pred.size(1))   # size:(H,W,C（类别）)
         pred = pred.to(sp_maps.device)
 
         for sp_idx in range(sp_maps.max().item() + 1):
-            pred[sp_maps == sp_idx] = self.sp_pred[sp_idx]
+            pred[sp_maps == sp_idx] = self.sp_pred[sp_idx]  # self.sp_pred[sp_idx]: （C,）第idx个超像素的预测C类的结果
 
-        return pred.unsqueeze(0)[..., 1]
+        return pred.unsqueeze(0)[..., 1]  # size:(1,H,W), 获得c=1的概率
 
 
 class WESUPPixelInference(WESUP):
@@ -422,7 +427,6 @@ class WESUPTrainer(BaseTrainer):
 
     def __init__(self, model, **kwargs):
         """Initialize a WESUPTrainer instance.
-
         Kwargs:
             rescale_factor: rescale factor to subsample input images 重新缩放因子的子样本输入图像
             multiscale_range: multi-scale range for training 多尺度范围的训练
@@ -435,7 +439,6 @@ class WESUPTrainer(BaseTrainer):
             momentum: SGD momentum
             weight_decay: weight decay for optimizer
             freeze_backbone: whether to freeze backbone
-
         Returns:
             trainer: a new WESUPTrainer instance
         """
@@ -454,6 +457,8 @@ class WESUPTrainer(BaseTrainer):
     def get_default_dataset(self, root_dir, train=True, proportion=1.0):
         if train:
             if os.path.exists(os.path.join(root_dir, 'points')):
+                # return PointSupervisionDataset(root_dir, proportion=proportion,
+                #                               multiscale_range=self.kwargs.get('multiscale_range'))
                 return Digest2019PointDataset(root_dir, proportion=proportion,
                                               multiscale_range=self.kwargs.get('multiscale_range'))
             return SegmentationDataset(root_dir, proportion=proportion,
@@ -463,7 +468,7 @@ class WESUPTrainer(BaseTrainer):
     def get_default_optimizer(self):
         optimizer = torch.optim.SGD(
             filter(lambda p: p.requires_grad, self.model.parameters()),
-            lr=5e-5,
+            lr= 6e-4,
             momentum=self.kwargs.get('momentum'),
             weight_decay=self.kwargs.get('weight_decay'),
         )
@@ -472,10 +477,10 @@ class WESUPTrainer(BaseTrainer):
 
         return optimizer, None
 
-    # 预处理
+    # 预处理,包含超像素分割等  img(1(batch_size),3,W,H)   point_mask/pixel_mask: (1,2(类别),W,H)
     def preprocess(self, *data):
         data = [datum.to(self.device) for datum in data]
-        if len(data) == 3:
+        if len(data) == 3: # 点标注信息时
             img, pixel_mask, point_mask = data
         elif len(data) == 2:
             img, pixel_mask = data
@@ -487,7 +492,7 @@ class WESUPTrainer(BaseTrainer):
         else:
             raise ValueError('Invalid input data for WESUP')
 
-        # SLIC 超像素分割
+        # SLIC 超像素分割, 此时进来的image已经缩小过了 不是原图大小了。
         segments = slic(
             img.squeeze().cpu().numpy().transpose(1, 2, 0),
             n_segments=int(img.size(-2) * img.size(-1) /    # n_segments: 分割输出图像中标签的(近似)数目。
@@ -497,13 +502,14 @@ class WESUPTrainer(BaseTrainer):
         segments = torch.as_tensor(
             segments, dtype=torch.long, device=self.device)
 
-        if point_mask is not None and not is_empty_tensor(point_mask):
+        if point_mask is not None and not is_empty_tensor(point_mask):  # 如果点标签存在,点标注就是 mask, 即为点标注模式
             mask = point_mask.squeeze()
-        elif pixel_mask is not None and not is_empty_tensor(pixel_mask):
+        elif pixel_mask is not None and not is_empty_tensor(pixel_mask): # 无点标签,则像素mask标注就是 mask, 即为全监督模式
             mask = pixel_mask.squeeze()
         else:
             mask = None
 
+        # 超像素预处理
         sp_maps, sp_labels = _preprocess_superpixels(
             segments, mask, epsilon=self.kwargs.get('epsilon'))
 
@@ -513,9 +519,13 @@ class WESUPTrainer(BaseTrainer):
 
     # 计算wesup的损失
     def compute_loss(self, pred, target, metrics=None):
+        '''
+            target = (pixel_mask, sp_labels)
+            pixel_mask(1, C(分类数), W, H), sp_labels(SP_Number, C)
+        '''
         _, sp_labels = target
 
-        sp_features = self.model.sp_features
+        sp_features = self.model.sp_features   # 标签传递要用到
         sp_pred = self.model.sp_pred
 
         if sp_pred is None:
@@ -530,7 +540,7 @@ class WESUPTrainer(BaseTrainer):
 
         if labeled_num < total_num:
             # weakly-supervised mode  weakly-supervised模式
-            loss = self.xentropy(sp_pred[:labeled_num], sp_labels)
+            loss = self.xentropy(sp_pred[:labeled_num], sp_labels) # 只取已标注的超像素进行loss计算
 
             if self.kwargs.get('enable_propagation'):
                 propagated_labels = _label_propagate(sp_features, sp_labels,
@@ -541,7 +551,7 @@ class WESUPTrainer(BaseTrainer):
                 loss += self.kwargs.get('propagate_weight') * propagate_loss
 
             if metrics is not None and isinstance(metrics, dict):
-                metrics['labeled_sp_ratio'] = labeled_num / total_num
+                metrics['labeled_sp_ratio'] = labeled_num / total_num  # 已标注的超像素比例
                 if self.kwargs.get('enable_propagation'):
                     metrics['propagated_labels'] = propagated_labels.sum().item()
                     metrics['propagate_loss'] = propagate_loss.item()
@@ -554,7 +564,7 @@ class WESUPTrainer(BaseTrainer):
         return loss
 
     def postprocess(self, pred, target=None):
-        pred = pred.round().long()
+        pred = pred.round().long()  # round(): 返回一个新张量，将pred张量每个元素舍入到最近的整数
         if target is not None:
             return pred, target[0].argmax(dim=1)
         return pred
