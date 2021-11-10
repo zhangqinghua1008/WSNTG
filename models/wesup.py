@@ -187,6 +187,7 @@ class WESUPConfig(BaseConfig):
     # Optimization parameters.
     momentum = 0.9
     weight_decay = 0.001
+    lr = 1e-3  # 6e-4
 
     # Whether to freeze backbone. 是否冻结骨干网
     freeze_backbone = False
@@ -468,7 +469,7 @@ class WESUPTrainer(BaseTrainer):
     def get_default_optimizer(self):
         optimizer = torch.optim.SGD(
             filter(lambda p: p.requires_grad, self.model.parameters()),
-            lr= 6e-4,
+            lr= self.kwargs.get('lr'), #6e-4,
             momentum=self.kwargs.get('momentum'),
             weight_decay=self.kwargs.get('weight_decay'),
         )
