@@ -11,6 +11,10 @@ from skimage.io import imread, imsave
 from utils_network.metrics import iou_score,dice_coef
 from pathlib import Path
 import numpy as np
+from infer_test_tile_utils import fast_pred_postprocess
+from joblib import Parallel,delayed
+from PIL import Image
+Image.MAX_IMAGE_PIXELS = None
 
 
 def postprocess(pred):
@@ -53,8 +57,34 @@ def performance_metrics(pre_dir,lable_dir):
     print("Dice",np.mean(dice_list))
     print("AC",np.mean(ac_list))
 
+
+def run_post(pre_dir,post_dir):
+    print("pre地址：", pre_dir)
+    print("post地址：", post_dir)
+    post_dir = Path(post_dir)
+    post_dir.mkdir(exist_ok=True)
+
+    def fun(fire):
+        print('%-6s' % fire.name, end="-> ")
+        Image.MAX_IMAGE_PIXELS = None
+        pred = io.imread(fire)
+        print(pred.shape)
+        post = fast_pred_postprocess(pred,pred.size*0.0001)
+
+        io.imsave(post_dir/ fire.name,post)
+
+    executor = Parallel(n_jobs=12)
+    executor(delayed(fun)(fire) for fire in Path(pre_dir).iterdir())
+
 if __name__ == '__main__':
-    # pre_dir = r"D:\组会内容\实验报告\MedT\records\Digestpath_WSI_results_new20"
-    pre_dir = r"D:\组会内容\实验报告\MedT\records\Digestpath_WSI_results_WESUP\temp\_pre"
-    lable_dir = r"D:\组会内容\data\Digestpath2019\MedT\test\labelcol"
-    performance_metrics(pre_dir,lable_dir)
+
+    lable_dir = r"D:\组会内容\data\Digestpath2019\MedT\test\all_test\labelcol"
+
+    # 模型预测输出地址
+    pre_dir = r"D:\组会内容\实验报告\MedT\records\Digestpath_WSI_results_WESUP\temp_all\_pre"
+    # performance_metrics(pre_dir,lable_dir)
+
+    # 执行后处理 并 比较指标
+    post_dir = r"D:\组会内容\实验报告\MedT\records\Digestpath_WSI_results_WESUP\temp_all\_post"
+    run_post(pre_dir,post_dir)
+    performance_metrics(post_dir, lable_dir)
