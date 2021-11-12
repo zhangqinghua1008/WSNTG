@@ -5,6 +5,8 @@ from infer_test_tile_utils import *
 from models import initialize_trainer
 from performance_metrics import *
 from models.wesup import WESUPPixelInference
+from PIL import Image
+Image.MAX_IMAGE_PIXELS = None
 """
     Inference module for window-based strategy.  基于窗口滑动的推理模块。
 """
@@ -35,8 +37,8 @@ def pixel_infer(model,data_dir,patch_size,resize_size=None,device='cuda',output_
 
             if output_dir is not None:
                 save_pre(pre, img_path, output_dir +"/_pre")
-                # pred_postprocess(pre, pre.size*0.001)  # 对预测出来的图片进行后处理,并保存
-                # save_pre(pre, img_path, output_dir + "/_post")
+                # post = fast_pred_postprocess(pre, pre.size*0.001)  # 对预测出来的图片进行后处理,并保存
+                # save_pre(post, img_path, output_dir + "/_post")
 
 
 def run():
@@ -62,12 +64,12 @@ def run():
     performance_metrics(pre_dir,lable_dir)
 
 def pixel_run():
-    data_dir = r"D:\组会内容\data\Digestpath2019\MedT\test/"
-    checkpoint = r"D:\组会内容\实验报告\MedT\records\20211106-1339-PM\checkpoints/ckpt.0054.pth"
+    data_dir = r"D:\组会内容\data\Digestpath2019\MedT\test\all_test/"
+    checkpoint = r"D:\组会内容\实验报告\MedT\records\20211111-0006-AM_tgcn\checkpoints/ckpt.0054.pth"
     patch_size = 800
     resize_size = 280  # None
 
-    output_dir = r"D:\组会内容\实验报告\MedT\records\Digestpath_WSI_results_WESUP/temp"
+    output_dir = r"D:\组会内容\实验报告\MedT\records\Digestpath_WSI_results_Tgcn\temp_all"
 
     # 加载模型
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
@@ -78,10 +80,16 @@ def pixel_run():
     pixel_infer(model,data_dir,patch_size = patch_size ,output_dir=output_dir,resize_size=resize_size,device=device)
 
     # 测指标
+    print(" -------- - - - - - - - 无后处理指标：")
     pre_dir = output_dir + "/_pre"
     # lable_dir = r"D:\组会内容\data\Digestpath2019\MedT\test\labelcol"
-    lable_dir = r"D:\组会内容\data\Digestpath2019\MedT\test\all_test\labelcol"
+    lable_dir = data_dir + "/labelcol"
     performance_metrics(pre_dir,lable_dir)
+
+    # print(" -------- - - - - - - - 经过后处理后指标：")
+    # post_dir = output_dir + "/_post"
+    # lable_dir = r"D:\组会内容\data\Digestpath2019\MedT\test\all_test\labelcol"
+    # performance_metrics(post_dir, lable_dir)
 pixel_run()
 
 
