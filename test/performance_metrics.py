@@ -27,35 +27,33 @@ def accuracy(P, G):
 
 
 def performance_metrics(pre_dir,lable_dir):
-    iou_list = []
-    dice_list = []
-    ac_list = []
-
     print("pre地址：",pre_dir)
     print("lable地址：",lable_dir)
-    for fire in Path(pre_dir).iterdir():
-        print('%-6s' % fire.name , end="-> ")
+
+    def fun(fire):
+        Image.MAX_IMAGE_PIXELS = None
         pred = io.imread(fire)
         pred = postprocess(pred)
         lable = io.imread(Path(lable_dir) / fire.name)
         lable = postprocess(lable)
 
         iou = iou_score(pred, lable)
-        iou_list.append(iou)
-
         dice_sc = dice_coef(pred, lable)
-        dice_list.append(dice_sc)
-
         ac = accuracy(pred, lable)
-        ac_list.append(ac)
 
-        print("Iou:{:.4f}  Dice:{:.4f}  AC:{:.4f}".format(iou, dice_sc, ac))
+        print('%-6s' % fire.name,"-> ","AC:{:.4f}  Iou:{:.4f}  Dice:{:.4f}  ".format(ac, iou, dice_sc))
+        return ac, iou, dice_sc
 
-    print("-------------")
-    print("测试集数量：",len(iou_list))
-    print("Iou:",np.mean(iou_list))
-    print("Dice",np.mean(dice_list))
-    print("AC",np.mean(ac_list))
+    # 多线程
+    executor = Parallel(n_jobs=12)
+    imgs_metrics = executor(delayed(fun)(fire) for fire in Path(pre_dir).iterdir())
+
+    print("\n-------------")
+    print("测试集数量：",len(imgs_metrics))
+    mean_metrics = np.mean(imgs_metrics, axis=0)
+    print("AC:{:.4f}".format( mean_metrics[0]))
+    print("Iou:{:.4f}".format(mean_metrics[1]))
+    print("Dice:{:.4f}".format(mean_metrics[2]))
 
 
 def run_post(pre_dir,post_dir):
@@ -78,7 +76,7 @@ def run_post(pre_dir,post_dir):
 if __name__ == '__main__':
 
     lable_dir = r"D:\组会内容\data\Digestpath2019\MedT\test\fast_test" + "/labelcol"
-    modelPre_dir = r"D:\组会内容\实验报告\MedT\records\Digestpath_WSI_results_Tgcn\temp/"  # 模型预测输出地址
+    modelPre_dir = r"D:\组会内容\实验报告\MedT\records\Digestpath_WSI_results_Tgcn\fast_test/"  # 模型预测输出地址
 
     # 模型直接预测的指标
     pre_dir = modelPre_dir + "/_pre"
