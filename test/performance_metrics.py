@@ -78,13 +78,14 @@ def run_post(pre_dir,post_dir):
 
 if __name__ == '__main__':
 
-    lable_dir = r"D:\组会内容\data\Digestpath2019\MedT\test\all_test\labelcol"
+    lable_dir = r"D:\组会内容\data\Digestpath2019\MedT\test\fast_test" + "/labelcol"
+    modelPre_dir = r"D:\组会内容\实验报告\MedT\records\Digestpath_WSI_results_Tgcn\temp/"  # 模型预测输出地址
 
-    # 模型预测输出地址
-    pre_dir = r"D:\组会内容\实验报告\MedT\records\Digestpath_WSI_results_WESUP\temp_all\_pre"
+    # 模型直接预测的指标
+    pre_dir = modelPre_dir + "/_pre"
     # performance_metrics(pre_dir,lable_dir)
 
     # 执行后处理 并 比较指标
-    post_dir = r"D:\组会内容\实验报告\MedT\records\Digestpath_WSI_results_WESUP\temp_all\_post"
+    post_dir = modelPre_dir + "/_post"
     run_post(pre_dir,post_dir)
     performance_metrics(post_dir, lable_dir)
