@@ -68,8 +68,7 @@ def run_post(pre_dir,post_dir):
         print('%-6s' % fire.name, end="-> ")
         Image.MAX_IMAGE_PIXELS = None
         pred = io.imread(fire)
-        print(pred.shape)
-        post = fast_pred_postprocess(pred,pred.size*0.0001)
+        post = fast_pred_postprocess(pred,pred.size*0.001)
 
         io.imsave(post_dir/ fire.name,post)
 
@@ -83,7 +82,7 @@ if __name__ == '__main__':
 
     # 模型直接预测的指标
     pre_dir = modelPre_dir + "/_pre"
-    # performance_metrics(pre_dir,lable_dir)
+    performance_metrics(pre_dir,lable_dir)
 
     # 执行后处理 并 比较指标
     post_dir = modelPre_dir + "/_post"

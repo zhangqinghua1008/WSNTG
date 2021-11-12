@@ -38,8 +38,10 @@ def pixel_infer(model,data_dir,patch_size,resize_size=None,device='cuda',output_
 
             if output_dir is not None:
                 save_pre(pre, img_path, output_dir +"/_pre")
-                # post = fast_pred_postprocess(pre, pre.size*0.001)  # 对预测出来的图片进行后处理,并保存
-                # save_pre(post, img_path, output_dir + "/_post")
+
+                # 对预测出来的图片进行后处理,并保存
+                post = fast_pred_postprocess(pre, pre.size*0.001)
+                save_post(post, img_path, output_dir + "/_post")
 
 
 def run():
@@ -67,19 +69,21 @@ def run():
 
 def pixel_run():
     checkpoint = r"D:\组会内容\实验报告\MedT\records\20211111-0006-AM_tgcn\checkpoints/ckpt.0054.pth"
-    model_type = 'tgcn'   # wesup / tgcn
+    # checkpoint = r"D:\组会内容\实验报告\MedT\records\20211106-1339-PM_wesup\checkpoints/ckpt.0054.pth"
+    model_type = 'wesup'   # wesup / tgcn
     patch_size = 800
     resize_size = 280  # None
 
+    output_dir = r"D:\组会内容\实验报告\MedT\records\Digestpath_WSI_results_Tgcn"
     test_model = 'fast'
     # 10张图快速测试
     if test_model =='fast':
-        data_dir = r"D:\组会内容\data\Digestpath2019\MedT\test"
-        output_dir = r"D:\组会内容\实验报告\MedT\records\Digestpath_WSI_results_Tgcn\temp"
+        data_dir = r"D:\组会内容\data\Digestpath2019\MedT\test\fast_test/"
+        output_dir = output_dir + "/fast_test"
     # 完整90张测试图片
     elif test_model == 'all':
         data_dir = r"D:\组会内容\data\Digestpath2019\MedT\test\all_test/"
-        output_dir = r"D:\组会内容\实验报告\MedT\records\Digestpath_WSI_results_Tgcn\temp_all"
+        output_dir = output_dir + "/all_test"
 
     # 加载模型
     device = 'cuda' if torch.cuda.is_available() else 'cpu'

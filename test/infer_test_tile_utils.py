@@ -3,7 +3,6 @@
 # @Author : 张清华
 # @File   : test_tile.py
 # @Note   :
-
 """
 Inference module for window-based strategy.  基于窗口策略的推理模块。
 """
@@ -18,7 +17,6 @@ import numpy as np
 import torch
 import torchvision.transforms.functional as TF
 
-import fire
 from tqdm import tqdm
 from PIL import Image
 from skimage.io import imread
@@ -178,28 +176,35 @@ def pixel_predict_bigimg(model, img_path, patch_size, resize_size=None,device='c
 
 
 def save_pre(predictions, img_paths, output_dir='predictions'):
-    """Save predictions to disk. 将预测保存到磁盘。
+    """Save predictions to disk. 将预测(值在 0-1 之间)保存到磁盘。
 
     Args:
         predictions: model predictions of size (N, H, W)
         img_paths: list of paths to input images
         output_dir: path to output directory
     """
-
     print(f'\nSaving prediction to {output_dir} ...')
 
     if not osp.exists(output_dir):
         os.mkdir(output_dir)
 
     img_name = osp.basename(img_paths)
-    print(img_name)
+    # print(img_name)
     pred = predictions.astype('uint8')
     Image.fromarray(pred * 255).save(osp.join(output_dir, img_name))
+
+def save_post(predictions, img_paths, output_dir='predictions'):
+    """ 将后处理结果(值在 0-255 之间)保存到磁盘。
+    """
+    if not osp.exists(output_dir): os.mkdir(output_dir)
+
+    img_name = osp.basename(img_paths)
+    pred = predictions.astype('uint8')
+    Image.fromarray(pred).save(osp.join(output_dir, img_name))
 
 
 def save_predictions(predictions, img_paths, output_dir='predictions'):
     """Save predictions to disk. 将预测保存到磁盘。
-
     Args:
         predictions: model predictions of size (N, H, W)
         img_paths: list of paths to input images
