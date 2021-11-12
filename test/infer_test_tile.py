@@ -5,6 +5,7 @@ from infer_test_tile_utils import *
 from models import initialize_trainer
 from performance_metrics import *
 from models.wesup import WESUPPixelInference
+from models.TGCN.tgcn import TGCNPixelInference
 from PIL import Image
 Image.MAX_IMAGE_PIXELS = None
 """
@@ -63,34 +64,46 @@ def run():
     lable_dir = r"D:\组会内容\data\Digestpath2019\MedT\test\labelcol"
     performance_metrics(pre_dir,lable_dir)
 
+
 def pixel_run():
-    data_dir = r"D:\组会内容\data\Digestpath2019\MedT\test\all_test/"
     checkpoint = r"D:\组会内容\实验报告\MedT\records\20211111-0006-AM_tgcn\checkpoints/ckpt.0054.pth"
+    model_type = 'tgcn'   # wesup / tgcn
     patch_size = 800
     resize_size = 280  # None
 
-    output_dir = r"D:\组会内容\实验报告\MedT\records\Digestpath_WSI_results_Tgcn\temp_all"
+    test_model = 'fast'
+    # 10张图快速测试
+    if test_model =='fast':
+        data_dir = r"D:\组会内容\data\Digestpath2019\MedT\test"
+        output_dir = r"D:\组会内容\实验报告\MedT\records\Digestpath_WSI_results_Tgcn\temp"
+    # 完整90张测试图片
+    elif test_model == 'all':
+        data_dir = r"D:\组会内容\data\Digestpath2019\MedT\test\all_test/"
+        output_dir = r"D:\组会内容\实验报告\MedT\records\Digestpath_WSI_results_Tgcn\temp_all"
 
     # 加载模型
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
-    model = WESUPPixelInference().to(device)
+    if model_type=='wesup':
+        model = WESUPPixelInference().to(device)
+    elif model_type=='tgcn':
+        model = TGCNPixelInference().to(device)
     if checkpoint is not None:
         model.load_state_dict(torch.load(checkpoint)['model_state_dict'])
 
     pixel_infer(model,data_dir,patch_size = patch_size ,output_dir=output_dir,resize_size=resize_size,device=device)
 
+    # GT 地址
+    lable_dir = data_dir + "/labelcol"
     # 测指标
     print(" -------- - - - - - - - 无后处理指标：")
     pre_dir = output_dir + "/_pre"
-    # lable_dir = r"D:\组会内容\data\Digestpath2019\MedT\test\labelcol"
-    lable_dir = data_dir + "/labelcol"
     performance_metrics(pre_dir,lable_dir)
 
-    # print(" -------- - - - - - - - 经过后处理后指标：")
-    # post_dir = output_dir + "/_post"
-    # lable_dir = r"D:\组会内容\data\Digestpath2019\MedT\test\all_test\labelcol"
-    # performance_metrics(post_dir, lable_dir)
-pixel_run()
+    print(" -------- - - - - - - - 经过后处理后指标：")
+    post_dir = output_dir + "/_post"
+    performance_metrics(post_dir, lable_dir)
 
+
+pixel_run()
 
 # run()
