@@ -136,28 +136,21 @@ class TGCNConfig(BaseConfig):
     """Configuration for TGCN model. 为TGCN型配置 """
 
     # Rescale factor to subsample input images. 重新缩放因子的子样本输入图像。
-    rescale_factor = 0.5
-    # rescale_factor = 1   #zqh
+    # rescale_factor = 0.5
+    rescale_factor = 0.5   #zqh
 
     # multi-scale range for training  多尺度范围训练
-    # multiscale_range = (0.3, 0.4)
-    multiscale_range = (0.4, 0.4)  # zqh
+    multiscale_range = (0.3, 0.4)
 
     # Number of target classes.
     n_classes = 2
 
     # Class weights for cross-entropy loss function.  交叉熵损失函数的类权值
-    class_weights = (3, 1)
+    class_weights = (3, 1)  # default = (3,1)
 
     # Superpixel parameters.
-    sp_area = 50   # 50 / 200
+    sp_area = 200   # 50 / 200
     sp_compactness = 40
-
-    # Weight for label-propagated samples when computing loss function 计算损时 标签传播样本的权重
-    propagate_threshold = 0.8
-
-    # Weight for label-propagated samples when computing loss function 计算损失时 标签传播样本的权重
-    propagate_weight = 0.5
 
     # Optimization parameters.
     momentum = 0.9
@@ -167,16 +160,16 @@ class TGCNConfig(BaseConfig):
     freeze_backbone = False
 
     # Training configurations.
-    batch_size = 4
-    epochs = 300
+    batch_size = 1
+    epochs = 200
 
-    lr = 1e-4
+    lr = 6e-4  # 6e-4
 
     is_gcn = True
     # Weight for TGCN  when computing loss function 计算损失时 tgcn的正则化loss权重
     # 'reg_scalar', 1e-05, 'Weight of smoothness regularizer.')  # 平滑权值正则化器
     # gcn_smooth_reg_weight = 1e-05   # 平滑度调整
-    gcn_smooth_reg_weight = 1e-04   # 平滑度调整
+    gcn_smooth_reg_weight = 1e-02   # 平滑度调整
 
 
 class TGCN(nn.Module):
@@ -201,9 +194,9 @@ class TGCN(nn.Module):
             if isinstance(layer, nn.Conv2d):  # isinstance() 函数来判断一个对象是否是一个已知的类型
                 layer.register_forward_hook(self._hook_fn)  # 对需要的层注册hook，后续该层执行完forword后去执行_hook_fn函数
                 setattr(self, f'side_conv{self.fm_channels_sum}',   # setattr(object, name, value) 函数指定对象的指定属性的值
-                        nn.Conv2d(layer.out_channels, layer.out_channels // 2, 1) )
+                        nn.Conv2d(layer.out_channels, layer.out_channels // 2, 1) )   # 指定side_conv{int} = Conv2d(64, 32, kernel_size=(1, 1), stride=(1, 1))
                 self.fm_channels_sum += layer.out_channels // 2
-        # 此时fm_channels_sum = 2112
+        # 此时fm_channels_sum = 2112，VGG16总的特征维度为4224，因为每次做了sude_conv卷积除2，所以才是2112
 
         # fully-connected layers for dimensionality reduction  全连接层降维
         self.fc_layers = nn.Sequential(
@@ -276,7 +269,6 @@ class TGCN(nn.Module):
 
     def forward(self, x):
         """Running a forward pass.
-
         Args:
             x: a tuple containing input tensor of size (1, C, H, W) and
                 stacked superpixel maps with size (N, H, W)
@@ -312,7 +304,6 @@ class TGCN(nn.Module):
             g1 = F.dropout(g1, self.dropout, training=self.training)
             g2 = self.gc2(g1, self.sp_features, adj_list)
             gcn_out = F.softmax(g2, dim=1)
-            # gcn_out = F.log_softmax(g2, dim=1)
             # gcn_out = torch.nn.functional.sigmoid(g2)
             self.gcn_output = gcn_out
         # ========================
@@ -339,7 +330,6 @@ class TGCNTrainer(BaseTrainer):
 
     def __init__(self, model, **kwargs):
         """Initialize a WESUPTrainer instance.
-
         Kwargs:
             rescale_factor: rescale factor to subsample input images 重新缩放因子的子样本输入图像
             multiscale_range: multi-scale range for training 多尺度范围的训练
@@ -347,12 +337,9 @@ class TGCNTrainer(BaseTrainer):
             sp_area: area of each superpixel 每个超像素的面积
             sp_compactness: compactness parameter of SLIC SLIC紧实度参数
             enable_propagation: whether to enable label propagation 是否启用标签传播
-            propagate_threshold: threshold for label propagation 标号传播阈值
-            propagate_weight: weight for label-propagated samples in loss function 损失函数中标签传播样本的权重
             momentum: SGD momentum
             weight_decay: weight decay for optimizer
             freeze_backbone: whether to freeze backbone
-
         Returns:
             trainer: a new WESUPTrainer instance
         """
@@ -379,11 +366,17 @@ class TGCNTrainer(BaseTrainer):
         return SegmentationDataset(root_dir, rescale_factor=self.kwargs.get('rescale_factor'), train=False)
 
     def get_default_optimizer(self):
+        # optimizer = torch.optim.Adam(
+        #     filter(lambda p: p.requires_grad, self.model.parameters()),
+        #     lr=self.kwargs.get('lr'),
+        #     betas = (self.kwargs.get('momentum'),0.999),
+        #     weight_decay=self.kwargs.get('weight_decay'), )
         optimizer = torch.optim.SGD(
             filter(lambda p: p.requires_grad, self.model.parameters()),
-            lr=self.kwargs.get('lr'),
+            lr=self.kwargs.get('lr'),  # 6e-4,
             momentum=self.kwargs.get('momentum'),
-            weight_decay=self.kwargs.get('weight_decay'),)
+            weight_decay=self.kwargs.get('weight_decay'),
+        )
         scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
             optimizer, 'min', patience=10, factor=0.5, min_lr=1e-5, verbose=True)
 
@@ -391,7 +384,7 @@ class TGCNTrainer(BaseTrainer):
 
     # 预处理,包含超像素分割等  img(1(batch_size),3,W,H)   point_mask/pixel_mask: (1,2(类别),W,H)
     def preprocess(self, *data):
-        data = [datum.to(self.device) for datum in data]
+        data = [datum.to(self.device) for datum in data]  # 放到CUDA中
         if len(data) == 3:   # 点标注信息时
             img, pixel_mask, point_mask = data
         elif len(data) == 2:
@@ -404,7 +397,7 @@ class TGCNTrainer(BaseTrainer):
         else:
             raise ValueError('Invalid input data for WESUP')
 
-        # SLIC 超像素分割
+        # SLIC 超像素分割, 此时进来的image已经缩小过了 不是原图大小了。
         segments = slic(
             img.squeeze().cpu().numpy().transpose(1, 2, 0),
             n_segments=int(img.size(-2) * img.size(-1) /    # n_segments: 分割输出图像中标签的(近似)数目。
@@ -442,7 +435,7 @@ class TGCNTrainer(BaseTrainer):
         if sp_pred is None:
             raise RuntimeError('You must run a forward pass before computing loss. 在计算损失之前，必须进行前向传递')
 
-        # 超像素的总数
+        # 超像素的总数seed
         total_num = sp_pred.size(0)
 
         # number of labeled superpixels 标记的超像素数
@@ -455,6 +448,7 @@ class TGCNTrainer(BaseTrainer):
         else:  # fully-supervised mode 全监督模式
             loss = self.xentropy(sp_pred, sp_labels)
 
+        regloss = 0
         # TGCN 正则化损失
         if self.kwargs.get('is_gcn'):
             gcn_out = self.model.gcn_output
@@ -470,7 +464,7 @@ class TGCNTrainer(BaseTrainer):
         self.model.gcn_output = None
         self.model.adj_list = None
 
-        return loss
+        return loss,regloss
 
     def postprocess(self, pred, target=None):
         pred = pred.round().long()  # round(): 返回一个新张量，将pred张量每个元素舍入到最近的整数
@@ -588,30 +582,5 @@ class TGCNPixelInference(TGCN):
         x = x.view(x.size(0), -1)
         x = self.fc_layers(x.t())
 
-        if self.kwargs.get('is_gcn'):
-            sp_features = x
-            adj_list = _adj(sp_features)    # 获得adj列表
-            self.adj_list = adj_list
-
-            # gcnx = F.dropout(self.sp_features , self.dropout, training=self.training)
-            g1 = F.relu( self.gc1(sp_features, adj_list) )
-            g1 = F.dropout(g1, self.dropout, training=self.training)
-            g2 = self.gc2(g1, sp_features, adj_list)
-            gcn_out = F.softmax(g2, dim=1)
-            # gcn_out = F.log_softmax(g2, dim=1)
-            # gcn_out = torch.nn.functional.sigmoid(g2)
-            self.gcn_output = gcn_out
-        # ========================
-
         x = self.classifier(x)
-
         return x.view(height, width, -1)
-
-        # self.feature_maps = None
-        # _ = self.backbone(x)
-        # x = self.feature_maps
-        # x = x.view(x.size(0), -1)
-        # x = self.classifier(self.fc_layers(x.t()))
-        #
-        # return x.view(height, width, -1)
-

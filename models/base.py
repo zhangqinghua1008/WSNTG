@@ -193,12 +193,17 @@ class BaseTrainer(ABC):
         with torch.set_grad_enabled(phase == 'train'):
             pred = self.model(input_)
             if phase == 'train':
-                loss = self.compute_loss(pred, target, metrics=metrics)
+                # loss = self.compute_loss(pred, target, metrics=metrics)
+                loss,gcn_loss = self.compute_loss(pred, target, metrics=metrics)
 
                 if torch.isnan(loss):
                     raise ValueError('Loss is nan!')
 
                 metrics['loss'] = loss.item()
+                if torch.is_tensor(gcn_loss):
+                    metrics['gcn_loss'] = gcn_loss.item()
+                else:
+                    metrics['gcn_loss'] = gcn_loss
 
                 loss.backward()
                 self.optimizer.step()
@@ -206,11 +211,12 @@ class BaseTrainer(ABC):
         pred, target = self.postprocess(pred, target)  # 后处理
 
         # 看index 保存
-        if index%10==0:
-            record.save_preAndTarge(self.record_dir,pred, target, index)  # 将实验参数保存到json
+        if index%50==0:
+            record.save_preAndMask(self.record_dir,pred, target, index)  # 保存模型中间输出
         # 先执行self.evaluate(pred, target),然后把返回的参数 和 现有的metrics 进行合并, 进而传给step
         self.tracker.step({**metrics, **self.evaluate(pred, target)})
 
+    # 1.epoch
     def train_one_epoch(self, no_val=False):
         """Hook for training one epoch.  Hook为训练一个时代
         Args:
@@ -269,7 +275,7 @@ class BaseTrainer(ABC):
 
         self.optimizer, self.scheduler = self.get_default_optimizer()
         self.load_checkpoint(self.kwargs.get('checkpoint'))  # checkpoint 一般为Nne
-        self.logger.addHandler(logging.FileHandler(self.record_dir / 'train.log'))
+        self.logger.addHandler(logging.FileHandler(self.record_dir / 'train.log'))   # 将文件handler添加到logger
         serializable_kwargs = {                 # serializable 可串行化的
             k: v for k, v in self.kwargs.items()
             if isinstance(v, (int, float, str, tuple))
@@ -326,8 +332,8 @@ class BaseTrainer(ABC):
             self.save_checkpoint(ckpt_path, epoch=epoch,optimizer_state_dict=self.optimizer.state_dict())
 
             # remove previous checkpoints 删除以前的检查点
-            for ckpt_path in sorted((self.record_dir / 'checkpoints').glob('*.pth'))[:-1]:
-                os.remove(ckpt_path)
+            # for ckpt_path in sorted((self.record_dir / 'checkpoints').glob('*.pth'))[:-1]:
+            #     os.remove(ckpt_path)
 
         self.logger.info(self.tracker.report())
 
