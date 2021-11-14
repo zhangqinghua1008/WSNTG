@@ -14,7 +14,9 @@ import numpy as np
 from infer_test_tile_utils import fast_pred_postprocess
 from joblib import Parallel,delayed
 from PIL import Image
+from tqdm import tqdm
 Image.MAX_IMAGE_PIXELS = None
+import time
 
 
 def postprocess(pred):
@@ -41,19 +43,19 @@ def performance_metrics(pre_dir,lable_dir):
         dice_sc = dice_coef(pred, lable)
         ac = accuracy(pred, lable)
 
-        print('%-6s' % fire.name,"-> ","AC:{:.4f}  Iou:{:.4f}  Dice:{:.4f}  ".format(ac, iou, dice_sc))
+        # print('%-6s' % fire.name,"-> ","AC:{:.4f}  Iou:{:.4f}  Dice:{:.4f}  ".format(ac, iou, dice_sc))
         return ac, iou, dice_sc
 
     # 多线程
     executor = Parallel(n_jobs=12)
-    imgs_metrics = executor(delayed(fun)(fire) for fire in Path(pre_dir).iterdir())
+    imgs_metrics = executor(delayed(fun)(fire) for fire in tqdm( Path(pre_dir).iterdir(), total=100))
 
-    print("\n-------------")
+    print("-------------")
     print("测试集数量：",len(imgs_metrics))
     mean_metrics = np.mean(imgs_metrics, axis=0)
     print("AC:{:.4f}".format( mean_metrics[0]))
     print("Iou:{:.4f}".format(mean_metrics[1]))
-    print("Dice:{:.4f}".format(mean_metrics[2]))
+    print("Dice:{:.4f}\n".format(mean_metrics[2]))
 
 
 def run_post(pre_dir,post_dir):
@@ -63,26 +65,31 @@ def run_post(pre_dir,post_dir):
     post_dir.mkdir(exist_ok=True)
 
     def fun(fire):
-        print('%-6s' % fire.name, end="-> ")
         Image.MAX_IMAGE_PIXELS = None
         pred = io.imread(fire)
-        post = fast_pred_postprocess(pred,pred.size*0.001)
+        post = fast_pred_postprocess(pred,pred.size*0.0005)
+        print('%-6s' % fire.name, end="-> ")
 
-        io.imsave(post_dir/ fire.name,post)
+        post = Image.fromarray(np.uint8(post))
+        post.save(post_dir/ fire.name)
 
     executor = Parallel(n_jobs=12)
     executor(delayed(fun)(fire) for fire in Path(pre_dir).iterdir())
 
 if __name__ == '__main__':
-
-    lable_dir = r"D:\组会内容\data\Digestpath2019\MedT\test\fast_test" + "/labelcol"
-    modelPre_dir = r"D:\组会内容\实验报告\MedT\records\Digestpath_WSI_results_Tgcn\fast_test/"  # 模型预测输出地址
+    start = time.time()
+    lable_dir = r"D:\组会内容\data\Digestpath2019\MedT\test\all_test" + "/labelcol"
+    modelPre_dir = r"D:\组会内容\实验报告\MedT\records\Digestpath_WSI_results_Tgcn\all_test/"  # 模型预测输出地址
 
     # 模型直接预测的指标
     pre_dir = modelPre_dir + "/_pre"
     performance_metrics(pre_dir,lable_dir)
 
-    # 执行后处理 并 比较指标
+    # 后处理地址
     post_dir = modelPre_dir + "/_post"
+    # 执行后处理
     run_post(pre_dir,post_dir)
+    # 比较后处理后图像指标
     performance_metrics(post_dir, lable_dir)
+
+    print("花费：",time.time()-start)  # 不open():272   把小图进行open_3 : 250  大图open_30,小图open_4:252

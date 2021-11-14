@@ -22,6 +22,14 @@ from PIL import Image
 from skimage.io import imread
 from skimage import measure
 from skimage import color
+import cv2
+
+# 图像open操作
+def img_open(image,open_size):
+    kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (open_size, open_size))
+    image = cv2.morphologyEx(image, cv2.MORPH_OPEN, kernel)
+    return image
+
 
 def preprocess(device,*data):
     return [datum.to(device) for datum in data]
@@ -254,10 +262,27 @@ def pred_postprocess(pred, threshold=10000):
 
 
 def fast_pred_postprocess(pred, threshold=10000):
+    # 先进行open操作,去掉零星点
+    if pred.size < 4000 * 4000:
+        threshold = pred.size * 0.0005
+        pred = img_open(pred, open_size=3)
+    elif pred.size <10000*10000:
+        threshold = pred.size * 0.0002
+        pred = img_open(pred, open_size=6)
+    else:
+        pred = img_open(pred,open_size = 30)
+        regions = measure.label(pred)
+        # 规避图像大小过大 域过多的情况
+        # return pred
+        if( regions.max() > 50000):
+            return pred
+        threshold = 10000*10000*0.0001
+        print("超过10000，但是区域少于5w")
+
     #  快速后处理。
     regions = measure.label(pred)
     props = measure.regionprops(regions)
-    resMatrix = np.zeros(regions.shape)
+    resMatrix = np.zeros(regions.shape).astype(np.uint8)
     for i in range(0, len(props)):
         if props[i].area > threshold:
             tmp = (regions == i + 1).astype(np.uint8)
@@ -267,7 +292,7 @@ def fast_pred_postprocess(pred, threshold=10000):
     #     去掉包含的杂点
     revert_regions = measure.label(255 - resMatrix)
     revert_props = measure.regionprops(revert_regions)
-    new_resMatrix = np.zeros(regions.shape)
+    new_resMatrix = np.zeros(regions.shape).astype(np.uint8)
     for i in range(0, len(revert_props)):
         if revert_props[i].area < threshold:
             tmp = (revert_regions == i + 1).astype(np.uint8)

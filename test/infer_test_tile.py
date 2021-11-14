@@ -68,14 +68,15 @@ def run():
 
 
 def pixel_run():
-    checkpoint = r"D:\组会内容\实验报告\MedT\records\20211111-0006-AM_tgcn\checkpoints/ckpt.0054.pth"
+    checkpoint = r"D:\组会内容\实验报告\MedT\records\20211113-1807-PM_tgcn\checkpoints/ckpt.0040.pth"
+    model_type = 'tgcn'  # wesup / tgcn
     # checkpoint = r"D:\组会内容\实验报告\MedT\records\20211106-1339-PM_wesup\checkpoints/ckpt.0054.pth"
-    model_type = 'wesup'   # wesup / tgcn
+    # model_type = 'wesup'   # wesup / tgcn
     patch_size = 800
     resize_size = 280  # None
 
     output_dir = r"D:\组会内容\实验报告\MedT\records\Digestpath_WSI_results_Tgcn"
-    test_model = 'fast'
+    test_model = 'all'  # fast || all
     # 10张图快速测试
     if test_model =='fast':
         data_dir = r"D:\组会内容\data\Digestpath2019\MedT\test\fast_test/"
