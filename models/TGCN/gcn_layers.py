@@ -49,9 +49,6 @@ class GraphConvolution(Module):
             return output
 
 class GraphConvolution_Line(Module):  # 原始GCN作者代码，只使用全连接层代替，代替后因为参数初始化不确定，导致结果不稳定
-    """
-    Simple GCN layer, similar to https://arxiv.org/abs/1609.02907
-    """
     '''
         GraphConvolution作为一个类，定义其相关属性。主要定义了其两个输入:输入特征in_feature、
         输出特征out_feature，以及权重weight和偏移向量bias两个参数，同时调用了其参数初始化的方法。
@@ -73,12 +70,11 @@ class GraphConvolution_Line(Module):  # 原始GCN作者代码，只使用全连�
                + str(self.out_features) + ')'
 
 class AdaptiveGraphConvolution(Module):
-    """
-    Simple GCN layer, similar to https://arxiv.org/abs/1609.02907
-    """
     '''
         GraphConvolution作为一个类，定义其相关属性。主要定义了其两个输入:输入特征维度in_feature、
         输出特征out_feature，以及权重weight和偏移向量bias两个参数，同时调用了其参数初始化的方法。
+        
+        len:表示几个邻接矩阵, 也就是有几个图
     '''
     def __init__(self, in_features_dim, out_features_dim, len , bias=True):
         super(AdaptiveGraphConvolution, self).__init__()
