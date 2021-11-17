@@ -44,7 +44,7 @@ def _preprocess_superpixels(segments, mask=None, epsilon=1e-7):
         sp_labels = torch.cat([
             compute_superpixel_label(sp_idx).unsqueeze(0)
             for sp_idx in range(segments.max() + 1)
-        ])  # sp_labels shape: [sp_N, 2] ,sp_N 是超像素个数, 代表超像素为每一类的概率
+        ])  # sp_labels : [sp_N, 2] ,代表超像素为每一类的概率; 其中sp_N 是超像素个数;
 
         # move labeled superpixels to the front of `sp_idx_list` 将带标签的超像素移到' sp_idx_list '的前面
         labeled_sps = (sp_labels.sum(dim=-1) > 0).nonzero(as_tuple=False).flatten()  # 列表,包含已经标注的超像素的id
@@ -104,6 +104,8 @@ def _cross_entropy(y_hat, y_true, class_weights=None, epsilon=1e-7):
 def _adj(sp_features):
     # adj.size: (N,N)
     low_features = sp_features[:,:16]
+    # feature affinity matrix  特征关联矩阵
+    # features - features.unsqueeze(1): size(N,N,D)
     adj1 = torch.exp(-torch.einsum('ijk,ijk->ij',    # 爱因斯坦求和 （einsum）
                                 low_features - low_features.unsqueeze(1),
                                 low_features - low_features.unsqueeze(1)))
@@ -149,7 +151,7 @@ class TGCNConfig(BaseConfig):
     class_weights = (3, 1)  # default = (3,1)
 
     # Superpixel parameters.
-    sp_area = 200   # 50 / 200
+    sp_area = 150   # 50 / 200
     sp_compactness = 40
 
     # Optimization parameters.
@@ -215,9 +217,10 @@ class TGCN(nn.Module):
         )
 
         # ============================= 图网络初始化
+        #  层次化特征图
         self.gcn_nfeat = D
-        self.gcn_nhid = D*2
-        self.adj_len = 2
+        self.gcn_nhid = D*2  # 隐藏层层数
+        self.adj_len = 2     # adj长度(也就是有几个图)
         self.gcn_out_dim = 2
         self.gc1 = AdaptiveGraphConvolution(in_features_dim  = self.gcn_nfeat,
                                             out_features_dim = self.gcn_nhid,
@@ -272,7 +275,7 @@ class TGCN(nn.Module):
         Args:
             x: a tuple containing input tensor of size (1, C, H, W) and
                 stacked superpixel maps with size (N, H, W)
-            x : 一个元组，包含大小为(1,C, H, W)输入张量, 具有大小(N, H, W)的堆叠超像素映射
+            x : 一个元组，包含大小为(1,C, H, W)输入张量, 和 具有大小(N, H, W)的堆叠超像素映射
 
         Returns:
             pred: prediction with size (1, H, W)
@@ -296,7 +299,8 @@ class TGCN(nn.Module):
 
         # TGCN =============
         if self.kwargs.get('is_gcn'):
-            adj_list = _adj(self.sp_features)    # 获得adj列表
+            #  层次化特征 构建多图
+            adj_list = _adj(self.sp_features)    # 获得adj列表  sp_features:(N,32) -> adj.size: (N,N) -> adj_list:[adj1,adj2]
             self.adj_list = adj_list
 
             # gcnx = F.dropout(self.sp_features , self.dropout, training=self.training)
