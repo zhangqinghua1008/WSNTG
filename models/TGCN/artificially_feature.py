@@ -7,6 +7,12 @@
 import cv2
 import time
 import numpy as np
+import torch
+import torchvision.transforms.functional as TF
+from pathlib import Path
+from skimage import io
+
+smooth = 1e-5
 
 # 求H(i)
 def Hi(hist, img):
@@ -20,7 +26,7 @@ def colour_feature(gray):
 
     # gray_mean:均值, gray_var:标准差
     gray_mean, gray_var = cv2.meanStdDev(gray)
-
+    gray_mean, gray_var = gray_mean+smooth, gray_var+smooth
     # peak
     gray_peak = 0
     for i, h_i in enumerate(h_gray):
@@ -28,14 +34,14 @@ def colour_feature(gray):
     gray_peak = gray_peak / (gray_var ** 4) - 3
 
     # energy
-    gray_energy = np.array([np.sum(h_gray ** 2)])
+    gray_energy = np.array([np.sum(h_gray ** 2)+smooth])
 
     # entropy
     gray_entropy = 0
     for i, h_i in enumerate(h_gray):
         if (h_i > 0):
             gray_entropy += h_i * np.log2(h_i)
-    gray_entropy = -gray_entropy
+    gray_entropy = -gray_entropy + smooth
 
     all_colour = [gray_mean[0], gray_var[0], gray_peak[0], gray_energy, gray_entropy]
     all_colour = np.hstack(all_colour)
@@ -82,7 +88,8 @@ def coarseness(image, kmax):
 # 纹理特征
 def texture_features(img_gray):
     # 论文中用的这个
-    fcrs = coarseness(img_gray, 5)
+    # fcrs = coarseness(img_gray, 5)
+    fcrs = 1.1
     return np.array( [fcrs] )
 
 
@@ -94,9 +101,9 @@ def morphological_features(img_gray):
     contours, hierarchy = cv2.findContours(thresh, cv2.RETR_TREE, cv2.CHAIN_APPROX_NONE)
 
     # 平均面积
-    post_cnt = []
-    post_area = []
-    post_lenth = []
+    post_cnt = [1]
+    post_area = [1]
+    post_lenth = [1]
     for cnt in contours:
         cnt_area = cv2.contourArea(cnt)  # 计算轮廓面积
         # 筛选掉过小的轮廓
@@ -114,23 +121,43 @@ def morphological_features(img_gray):
 
 
 #手工特征
-def art_features(img):
+def art_features(_img):
+    if torch.is_tensor(_img):
+        img = _img.clone()
+        img = img.squeeze().detach().cpu().numpy().transpose(1, 2, 0)
+        img = (img * 255).astype('uint8')
+    else:
+        img = _img
+
     gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
     colours = colour_feature(gray)
     textures = texture_features(gray)
     morphologicals = morphological_features(gray)
-    print(colours)
-    print(textures)
-    print(morphologicals)
-    return np.hstack( [colours,textures,morphologicals] )
+
+    all = np.hstack( (colours,textures,morphologicals) )
+    all = np.vstack(all)
+    all[np.isnan(all)] = smooth # 排除nan值
+    return all
+
 
 if __name__ == '__main__':
     start = time.time()
 
-    file = r"C:/Users/ASUS/Desktop/0_5.png"
-    img = cv2.imread(file)
+    dir = Path(r"D:\组会内容\data\Digestpath2019\MedT\train\only_mask\train_800\train\img")
+    print(dir)
+    for index,file in enumerate(dir.iterdir()):
+        print(index,file)
+        img = io.imread(file)
+        img = np.zeros_like(img)
+        img = TF.to_tensor(img).unsqueeze(0).cuda()
 
-    features = art_features(img)
-    print(features)
+        features = art_features(img)
+        print(features)
 
-    print("花费时间：",time.time() - start )
+        features = torch.from_numpy(features)
+        print(features.shape)
+
+        # if index>50:
+        break
+
+    print("花费时间：", time.time() - start)

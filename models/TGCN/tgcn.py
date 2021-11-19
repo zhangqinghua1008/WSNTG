@@ -16,122 +16,9 @@ from models.base import BaseConfig, BaseTrainer
 from .gcn_layers import AdaptiveGraphConvolution
 from .gcn_layers import AdaptiveGraphRecursiveConvolution
 
-
-def _preprocess_superpixels(segments, mask=None, epsilon=1e-7):
-    """Segment superpixels of a given image and return segment maps and their labels.
-        给定图像的分段超像素，并return 分段映射(segment maps)及其标签。
-    Args:
-        segments: slic segments tensor with shape (H, W)   (H,W)大小的slic分割张量,每个像素一个超像素的编号（slic segments tensor）
-        mask (optional): annotation mask tensor with shape (C, H, W). Each pixel is a one-hot
-            encoded label vector. If this vector is all zeros, then its class is unknown.
-                形状为（C，H，W）的注释掩码张量。每个像素是一个热编码标签向量。如果这个向量都是零，那么它的类是未知的。
-    Returns:
-        sp_maps: superpixel maps with shape (N, H, W)
-        sp_labels: superpixel labels with shape (N_l, C), where N_l is the number of labeled samples.
-        sp_maps: 具有形状(N, H, W)的超像素映射
-        sp_labels: 具有形状(N_l, C)的超像素标签，其中N_l为已标记样本的数量。
-    """
-    # ordering of superpixels  获取所有的超像素标签（就是1...n，共n个超像素）
-    sp_idx_list = segments.unique()
-
-    # mask存在，说明为点监督 或 全监督
-    if mask is not None and not is_empty_tensor(mask):
-        def compute_superpixel_label(sp_idx):
-            sp_mask = (mask * (segments == sp_idx).long()).float()
-            return sp_mask.sum(dim=(1, 2)) / (sp_mask.sum() + epsilon)   # epsilon 避免出现0的情况
-
-        # compute labels for each superpixel  计算每个超像素的标签 -> [0,1]之间的一个值
-        sp_labels = torch.cat([
-            compute_superpixel_label(sp_idx).unsqueeze(0)
-            for sp_idx in range(segments.max() + 1)
-        ])  # sp_labels : [sp_N, 2] ,代表超像素为每一类的概率; 其中sp_N 是超像素个数;
-
-        # move labeled superpixels to the front of `sp_idx_list` 将带标签的超像素移到' sp_idx_list '的前面
-        labeled_sps = (sp_labels.sum(dim=-1) > 0).nonzero(as_tuple=False).flatten()  # 列表,包含已经标注的超像素的id
-        unlabeled_sps = (sp_labels.sum(dim=-1) == 0).nonzero(as_tuple=False).flatten()
-        sp_idx_list = torch.cat([labeled_sps, unlabeled_sps])
-
-        # quantize superpixel labels (e.g., from (0.7, 0.3) to (1.0, 0.0))
-        # 量化超像素标签(例如，从(0.7,0.3)到(1.0,0.0))
-        sp_labels = sp_labels[labeled_sps]   # 拿到已标注的超像素标签
-        sp_labels = (sp_labels == sp_labels.max(dim=-1, keepdim=True)[0]).float()
-
-    else:  # no supervision provided  没有提供监督
-        sp_labels = empty_tensor().to(segments.device)
-
-    # stacking normalized superpixel segment maps 叠加归一化超像素段映射
-    sp_maps = segments == sp_idx_list[:, None, None]
-    sp_maps = sp_maps.squeeze().float()  # size: (S_N,W,H)
-
-    # make sure each superpixel map sums to one  确保每个超像素映射和为1.  之前超像素每个像素标签都是1，此时所有像素标签sum为1
-    sp_maps = sp_maps / sp_maps.sum(dim=(1, 2), keepdim=True)
-
-    return sp_maps, sp_labels
-
-
-def _cross_entropy(y_hat, y_true, class_weights=None, epsilon=1e-7):
-    """Semi-supervised cross entropy loss function. 半监督交叉熵损失函数。
-    Args:
-        y_hat: prediction tensor with size (N, C), where C is the number of classes 预测张量,size:(N, C)，C是类的数量
-        y_true: label tensor with size (N, C). A sample won't be counted into loss
-            if its label is all zeros.    标注张量,size:(N, C)。如果它的标签全是0,样本不会计入损失
-        class_weights: class weights tensor with size (C,)  具有大小(C，)的类权张量
-        epsilon: numerical stability term   数值稳定的术语
-    Returns:
-        cross_entropy: cross entropy loss computed only on samples with labels  交叉熵损失仅对带有标签的样本进行计算
-    """
-
-    device = y_hat.device
-
-    # clamp all elements to prevent numerical overflow/underflow  夹紧所有元件，防止数值溢出/下流
-    y_hat = torch.clamp(y_hat, min=epsilon, max=(1 - epsilon))    # 将y_hat缩放到(0,1)之间 (本来就应该在0-1之间，这样是为了防止意外)
-
-    # number of samples with labels  带标签的样品数量
-    labeled_samples = torch.sum(y_true.sum(dim=1) > 0).float()
-
-    if labeled_samples.item() == 0:    # 都是未标注的话,直接返回0
-        return torch.tensor(0.).to(device)
-
-    ce = -y_true * torch.log(y_hat)
-
-    if class_weights is not None:   # 给不同的类,分配不同的权值,一般为None
-        ce = ce * class_weights.unsqueeze(0).float()
-
-    return torch.sum(ce) / labeled_samples
-
-# =========== 生成邻接矩阵
-# sp_features： （N,32）
-def _adj(sp_features):
-    # adj.size: (N,N)
-    low_features = sp_features[:,:16]
-    # feature affinity matrix  特征关联矩阵
-    # features - features.unsqueeze(1): size(N,N,D)
-    adj1 = torch.exp(-torch.einsum('ijk,ijk->ij',    # 爱因斯坦求和 （einsum）
-                                low_features - low_features.unsqueeze(1),
-                                low_features - low_features.unsqueeze(1)))
-    high_features = sp_features[:,16:]
-    adj2 = torch.exp(-torch.einsum('ijk,ijk->ij',  # 爱因斯坦求和 （einsum）
-                                   high_features - high_features.unsqueeze(1),
-                                   high_features - high_features.unsqueeze(1)))
-    return [adj1,adj2]
-
-# def smoothness_reg(gcn_out, adj_list, loss, reg_scalar):
-def smoothness_reg(gcn_out, adj_list):
-    loss = 0
-    for i in range(len(adj_list)):
-        # the first power of each graph in the list ...  maybe transform to Laplacian?
-        # 列表中每个图的第一次方…或者转换成拉普拉斯式?
-        # pre_trace_tensor= torch.matmul( torch.transpose(torch.matmul( adj_list[i][0],gcn_out)), gcn_out)
-        # pre_trace_tensor = reg_scalar*pre_trace_tensor
-        # pre_reg = torch.trace(pre_trace_tensor) / tf.cast(torch.shape(gcn_out)[0] * torch.shape(gcn_out)[1], 'float32')
-        # pre_reg = torch.trace(pre_trace_tensor) / torch.FloatTensor( gcn_out.size[0] * gcn_out.size[1] )
-
-        one = torch.matmul(gcn_out.t(), adj_list[i])
-        res = torch.matmul(one, gcn_out)
-        tr = torch.trace(res)
-        pre_reg = tr / float(gcn_out.size()[0] * gcn_out.size()[1])
-        loss+= pre_reg
-    return loss
+from artificially_feature import art_features
+from handler import _preprocess_superpixels,_cross_entropy
+from handler import _adj,art_adj,smoothness_reg
 
 
 class TGCNConfig(BaseConfig):
@@ -151,7 +38,7 @@ class TGCNConfig(BaseConfig):
     class_weights = (3, 1)  # default = (3,1)
 
     # Superpixel parameters.
-    sp_area = 150   # 50 / 200
+    sp_area = 200   # 50 / 200
     sp_compactness = 40
 
     # Optimization parameters.
@@ -232,6 +119,22 @@ class TGCN(nn.Module):
         self.dropout = 0.8      # 图网络dropout 比例
         self.gcn_output = None  # 图网络output
         self.adj_list = None
+
+        # ------ ---------- ----手工特征图
+        self.artificial_features = None
+        self.art_gcn_nfeat = 1
+        self.art_gcn_nhid = 2 * 2  # 隐藏层层数
+        self.art_adj_len = 1  # adj长度(也就是有几个图)
+        self.art_gcn_out_dim = 2
+        self.art_gc1 = AdaptiveGraphConvolution(in_features_dim=self.art_gcn_nfeat,
+                                            out_features_dim=self.art_gcn_nhid,
+                                            len=self.art_adj_len, bias=True)
+        self.art_gc2 = AdaptiveGraphRecursiveConvolution(in_features_dim=self.art_gcn_nhid,
+                                                     net_input_dim=self.art_gcn_nfeat,
+                                                     out_features_dim=self.art_gcn_out_dim,
+                                                     len=self.adj_len, bias=True)
+        self.art_gcn_output = None  # 图网络output
+        self.art_adj_list = None
         # ============================= =============================
 
         # store conv feature maps 存储conv特性映射
@@ -283,6 +186,13 @@ class TGCN(nn.Module):
         x, sp_maps = x
         n_superpixels, height, width = sp_maps.size()  # n_superpixels:超像素个数, height,width 高,宽
 
+        # 构建手工特征
+        if self.kwargs.get('is_gcn'):
+            art_feas = art_features(x)
+            # print(art_feas)
+            self.artificial_features = torch.from_numpy(art_feas).cuda().to(torch.float32)
+            self.artificial_features.requires_grad = True
+
         # extract conv feature maps and flatten 提取卷积特征图并flatten
         self.feature_maps = None
         _ = self.backbone(x)
@@ -299,7 +209,7 @@ class TGCN(nn.Module):
 
         # TGCN =============
         if self.kwargs.get('is_gcn'):
-            #  层次化特征 构建多图
+            # --------------- 层次化特征 构建多图
             adj_list = _adj(self.sp_features)    # 获得adj列表  sp_features:(N,32) -> adj.size: (N,N) -> adj_list:[adj1,adj2]
             self.adj_list = adj_list
 
@@ -310,6 +220,17 @@ class TGCN(nn.Module):
             gcn_out = F.softmax(g2, dim=1)
             # gcn_out = torch.nn.functional.sigmoid(g2)
             self.gcn_output = gcn_out
+
+            # --------------- 手工特征 构建多图
+            art_adj_list = art_adj(self.artificial_features) # 获得手工特征adj列表
+            self.art_adj_list = art_adj_list
+
+            art_g1 = F.relu(self.art_gc1(self.artificial_features, art_adj_list))
+            art_g1 = F.dropout(art_g1, 0 , training=self.training)
+            art_g2 = self.art_gc2(art_g1, self.artificial_features, art_adj_list)
+            # art_gcn_out = F.softmax(art_g2, dim=1)
+            art_gcn_out = F.sigmoid(art_g2)
+            self.art_gcn_output = art_gcn_out
         # ========================
 
         # classify each superpixel  每个superpixel分类
@@ -453,22 +374,30 @@ class TGCNTrainer(BaseTrainer):
             loss = self.xentropy(sp_pred, sp_labels)
 
         regloss = 0
-        # TGCN 正则化损失
+        #=================== TGCN 正则化损失
         if self.kwargs.get('is_gcn'):
             gcn_out = self.model.gcn_output
             tgcn_loss = smoothness_reg(gcn_out, self.model.adj_list )
             regloss = self.kwargs.get('gcn_smooth_reg_weight') * tgcn_loss
             # self.logger.info( '正则化损失：',regloss.item())
-            loss += regloss
+
+            art_gcn_out = self.model.art_gcn_output
+            art_gcn_loss = smoothness_reg(art_gcn_out, self.model.art_adj_list)
+            # art_regloss = self.kwargs.get('gcn_smooth_reg_weight') * art_gcn_loss
+            art_regloss = art_gcn_loss
+            loss += (regloss+art_regloss)
 
         # clear outdated superpixel prediction 清除过时的超像素预测
         self.model.sp_pred = None
 
-        # clear outdated superpixel prediction 清除过时的超像素预测
+        # clear outdated superpixel prediction 清除过时的图
         self.model.gcn_output = None
         self.model.adj_list = None
 
-        return loss,regloss
+        self.model.art_gcn_output = None
+        self.model.art_adj_list = None
+
+        return loss,regloss,art_regloss
 
     def postprocess(self, pred, target=None):
         pred = pred.round().long()  # round(): 返回一个新张量，将pred张量每个元素舍入到最近的整数
