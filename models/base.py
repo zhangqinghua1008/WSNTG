@@ -194,7 +194,7 @@ class BaseTrainer(ABC):
             pred = self.model(input_)
             if phase == 'train':
                 # loss = self.compute_loss(pred, target, metrics=metrics)
-                loss,gcn_loss = self.compute_loss(pred, target, metrics=metrics)
+                loss,gcn_loss,art_gcn_loss = self.compute_loss(pred, target, metrics=metrics)
 
                 if torch.isnan(loss):
                     raise ValueError('Loss is nan!')
@@ -204,6 +204,11 @@ class BaseTrainer(ABC):
                     metrics['gcn_loss'] = gcn_loss.item()
                 else:
                     metrics['gcn_loss'] = gcn_loss
+                # 手工特征
+                if torch.is_tensor(art_gcn_loss):
+                    metrics['art_gcn_loss'] = art_gcn_loss.item()
+                else:
+                    metrics['art_gcn_loss'] = art_gcn_loss
 
                 loss.backward()
                 self.optimizer.step()
@@ -215,6 +220,7 @@ class BaseTrainer(ABC):
             record.save_preAndMask(self.record_dir,pred, target, index)  # 保存模型中间输出
         # 先执行self.evaluate(pred, target),然后把返回的参数 和 现有的metrics 进行合并, 进而传给step
         self.tracker.step({**metrics, **self.evaluate(pred, target)})
+        return  metrics
 
     # 1.epoch
     def train_one_epoch(self, no_val=False):
@@ -239,7 +245,8 @@ class BaseTrainer(ABC):
             pbar = tqdm(self.dataloaders[phase])
             for index,data in enumerate(pbar):   # 训练前这个地方需要加载，很慢，而且占用内存很多
                 try:
-                    self.train_one_iteration(index, phase, *data)
+                    metrics = self.train_one_iteration(index, phase, *data)
+                    pbar.set_postfix(metrics)
                 except RuntimeError as ex:
                     self.logger.exception(ex)
 
