@@ -22,7 +22,7 @@ def setup_seed(seed):
     torch.backends.cudnn.deterministic = True
 
 def fit(model='tgcn', **kwargs):   # model  = tgcn \ test \ wesup \ testunet \ testhover \ testresnet
-    # setup_seed(123)
+    setup_seed(123)
 
     # Initialize logger. 初始化日志记录器。
     logger = logging.getLogger('Train')         # 初始化变量，声明logger对象
