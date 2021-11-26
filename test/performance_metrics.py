@@ -29,8 +29,12 @@ def accuracy(P, G):
     return (P == G).mean()
 
 
-# type_index: 代表哪个种类的下标 (DICE:2)
 def save_curve(pre_dir,imgs_metrics,type_index=2,type = "dice"):
+    '''
+        保存每个测试图像指标的图表
+        imgs_metrics: 指标
+        type_index: 代表哪个种类的下标 (DICE:2)
+    '''
     curve_dir = pre_dir.parent
     dice_save = curve_dir / (pre_dir.name + "_"+type+".png")
     plt.scatter(x=imgs_metrics[:,3],y=imgs_metrics[:,type_index],
@@ -41,6 +45,7 @@ def save_curve(pre_dir,imgs_metrics,type_index=2,type = "dice"):
     plt.axhline(y=mean_metrics[type_index], color="red",
                 linestyle=":",label = "Mean")  # linestyle: '-', '--', '-.', ':',
 
+    plt.ylim((0, 1)) # 设置y轴范围
     plt.xlabel("Number")
     plt.ylabel(type)
     plt.title(type+pre_dir.name)
@@ -67,7 +72,7 @@ def performance_metrics(pre_dir,lable_dir):
         dice_sc = dice_coef(pred, lable)
         ac = accuracy(pred, lable)
 
-        print('%-6s' % fire.name,fire.name[:-4],"-> ","AC:{:.4f}  Iou:{:.4f}  Dice:{:.4f}  ".format(ac, iou, dice_sc))
+        # print('%-6s' % fire.name,fire.name[:-4],"-> ","AC:{:.4f}  Iou:{:.4f}  Dice:{:.4f}  ".format(ac, iou, dice_sc))
         return ac, iou, dice_sc, int(fire.name[:-4])
 
     # 多线程
@@ -84,8 +89,16 @@ def performance_metrics(pre_dir,lable_dir):
 
     save_curve(pre_dir,imgs_metrics,type_index=2,type = "dice") #绘制DICE散点图
 
+    low_dice = imgs_metrics[imgs_metrics[:, 2] < mean_metrics[2]]  # 获取小于DICE平均值的图像
+    low_dice = low_dice[np.argsort(low_dice[:,2])]  # 根据DICE排序
+    print(" 低于平均值的图像：")
+    for metrics in low_dice:
+        print('%4s.png' % int(metrics[3]), "-> ",
+              "AC:{:.4f}  Iou:{:.4f}  Dice:{:.4f}".format(metrics[0],metrics[1],metrics[2]))
 
+# 执行后处理
 def run_post(pre_dir,post_dir):
+    print(" -------- - - - - - - - 经过后处理：")
     print("pre地址：", pre_dir)
     print("post地址：", post_dir)
     post_dir = Path(post_dir)
@@ -103,20 +116,32 @@ def run_post(pre_dir,post_dir):
     executor = Parallel(n_jobs=12)
     executor(delayed(fun)(fire) for fire in Path(pre_dir).iterdir())
 
-if __name__ == '__main__':
+
+# 评价模型预测出的图像指标
+def evaluate_img(modelPre_dir,gt_lable_dir):
+    '''
+        modelPre_dir : 模型预测输出地址
+        gt_lable_dir : 真实标签地址
+    '''
     start = time.time()
+    # 模型直接预测的指标
+    pre_dir = modelPre_dir / "_pre"
+    performance_metrics(pre_dir, gt_lable_dir)
+
+    # 后处理地址
+    post_dir = modelPre_dir / "_post"
+    # 执行后处理
+    run_post(pre_dir, post_dir)
+    # 比较后处理后图像指标
+    performance_metrics(post_dir, gt_lable_dir)
+
+    print("花费：", time.time() - start)  # 不open():272   把小图进行open_3 : 250  大图open_30,小图open_4:252
+
+
+if __name__ == '__main__':
+
     modelPre_dir = r"D:\组会内容\实验报告\MedT\records\Digestpath_WSI_results_Tgcn\all_test/"  # 模型预测输出地址
     lable_dir = r"D:\组会内容\data\Digestpath2019\MedT\test\all_test" + "/labelcol"
 
-    # 模型直接预测的指标
-    pre_dir = modelPre_dir + "/_pre"
-    performance_metrics(pre_dir,lable_dir)
+    evaluate_img(modelPre_dir,lable_dir)
 
-    # 后处理地址
-    post_dir = modelPre_dir + "/_post"
-    # 执行后处理
-    # run_post(pre_dir,post_dir)
-    # 比较后处理后图像指标
-    performance_metrics(post_dir, lable_dir)
-
-    print("花费：",time.time()-start)  # 不open():272   把小图进行open_3 : 250  大图open_30,小图open_4:252

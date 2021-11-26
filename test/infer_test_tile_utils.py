@@ -264,10 +264,10 @@ def pred_postprocess(pred, threshold=10000):
 def fast_pred_postprocess(pred, threshold=10000):
     # 先进行open操作,去掉零星点
     if pred.size < 4000 * 4000:
-        threshold = pred.size * 0.0005
+        threshold = pred.size * 0.00008
         pred = img_open(pred, open_size=3)
     elif pred.size <10000*10000:
-        threshold = pred.size * 0.0002
+        threshold = pred.size * 0.00004
         pred = img_open(pred, open_size=6)
     else:
         pred = img_open(pred,open_size = 30)
@@ -276,7 +276,7 @@ def fast_pred_postprocess(pred, threshold=10000):
         # return pred
         if( regions.max() > 50000):
             return pred
-        threshold = 10000*10000*0.0001
+        threshold = pred.size*0.000005
         print("超过10000，但是区域少于5w")
 
     #  快速后处理。
