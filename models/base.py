@@ -71,12 +71,10 @@ class BaseTrainer(ABC):
     @abstractmethod
     def get_default_dataset(self, root_dir, train=True, proportion=1.0):
         """Get default dataset for training/validation.  获取用于培训/验证的默认数据集
-
         Args:
             root_dir: path to dataset root
             train: whether it is a dataset for training
             proportion: proportion of data to be used  所使用的数据的比例
-
         Returns:
             dataset: a `torch.utils.data.Dataset` instance
         """
@@ -87,7 +85,6 @@ class BaseTrainer(ABC):
             optimizer: default model optimizer
             scheduler: default learning rate scheduler (could be `None`)
         """
-
         return torch.optim.SGD(self.model.parameters(), lr=1e-3), None
 
     def preprocess(self, *data):
@@ -104,15 +101,33 @@ class BaseTrainer(ABC):
     @abstractmethod
     def compute_loss(self, pred, target, metrics=None):
         """Compute objective function.
-
         Args:
             pred: model prediction from the `forward` step
             target: target computed from `preprocess` method
             metrics: dict for tracking metrics when computing loss
-
-        Returns:
-            loss: model loss
+        Returns:  loss: model loss
         """
+
+    def postprocess(self, pred, target=None):
+        """Postprocess raw prediction and target before calling `evaluate` method.
+            在调用' evaluate '方法之前，对原始预测和目标进行后处理。
+        Args:
+            pred: prediction computed from the `forward` step
+            target: target computed from `preprocess` method (optional)
+        Returns:
+            pred: postprocessed prediction
+            target: postprocessed target (optional)
+        """
+        if target is not None:
+            return pred, target
+        return pred
+
+    def post_epoch_hook(self, epoch):
+        """Hook for post-epoch stage.
+        Args:
+            epoch: current epoch
+        """
+        pass
 
     def load_checkpoint(self, ckpt_path=None):
         """Load checkpointed model weights, optimizer states, etc, from given path.
@@ -120,7 +135,6 @@ class BaseTrainer(ABC):
         Args:
             ckpt_path: path to checkpoint
         """
-
         if ckpt_path is not None:
             self.record_dir = Path(ckpt_path).parent.parent
             self.logger.info(f'Loading checkpoint from {ckpt_path}.')
@@ -142,13 +156,11 @@ class BaseTrainer(ABC):
 
     def save_checkpoint(self, ckpt_path, **kwargs):
         """Save model checkpoint.
-
         Args:
             ckpt_path: path to checkpoint to be saved
             kwargs: additional information to be included in the checkpoint object
                     要包含在检查点对象中的附加信息
         """
-
         checkpoint = {
             'model_state_dict': self.model.state_dict(),
             'optimizer_state_dict': self.optimizer.state_dict(),
@@ -158,23 +170,6 @@ class BaseTrainer(ABC):
             checkpoint['scheduler_state_dict'] = self.scheduler.state_dict()
 
         torch.save(checkpoint, ckpt_path)
-
-    def postprocess(self, pred, target=None):
-        """Postprocess raw prediction and target before calling `evaluate` method.
-            在调用' evaluate '方法之前，对原始预测和目标进行后处理。
-
-        Args:
-            pred: prediction computed from the `forward` step
-            target: target computed from `preprocess` method (optional)
-
-        Returns:
-            pred: postprocessed prediction
-            target: postprocessed target (optional)
-        """
-
-        if target is not None:
-            return pred, target
-        return pred
 
     def train_one_iteration(self, index,phase, *data):
         """Hook for training one iteration.  训练一个迭代 / 训练一个batch
@@ -186,7 +181,7 @@ class BaseTrainer(ABC):
         # 预处理，在相应的模型py文件中执行
         input_, target = self.preprocess(*data)
 
-        self.optimizer.zero_grad()
+        # self.optimizer.zero_grad()
         metrics = dict()
 
         # .set_grad_enabled(Bool): 将梯度计算设置成打开或者关闭的上下文管理器.
@@ -210,8 +205,12 @@ class BaseTrainer(ABC):
                 else:
                     metrics['art_gcn_loss'] = art_gcn_loss
 
+                accum_steps = 1  # 梯度累加的量
+                loss = loss / accum_steps
                 loss.backward()
-                self.optimizer.step()
+                if (index+1) % accum_steps == 0:
+                    self.optimizer.step()
+                    self.optimizer.zero_grad()
 
         pred, target = self.postprocess(pred, target)  # 后处理
 
@@ -224,11 +223,10 @@ class BaseTrainer(ABC):
 
     # 1.epoch
     def train_one_epoch(self, no_val=False):
-        """Hook for training one epoch.  Hook为训练一个时代
+        """Hook for training one epoch.  Hook为训练一个epoch
         Args:
             no_val: whether to disable validation 是否禁用验证
         """
-
         phases = ['train'] if no_val else ['train', 'val']
         for phase in phases:  # 依次执行训练和val 阶段
             self.logger.info(f'{phase.capitalize()} phase:')
@@ -237,6 +235,7 @@ class BaseTrainer(ABC):
             if phase == 'train':
                 self.model.train()
                 self.tracker.train()
+            # val阶段
             else:
                 self.model.eval()
                 self.tracker.eval()
@@ -246,7 +245,7 @@ class BaseTrainer(ABC):
             for index,data in enumerate(pbar):   # 训练前这个地方需要加载，很慢，而且占用内存很多
                 try:
                     metrics = self.train_one_iteration(index, phase, *data)
-                    pbar.set_postfix(metrics)
+                    pbar.set_postfix(metrics)  # 在进度条上输出loss等信息
                 except RuntimeError as ex:
                     self.logger.exception(ex)
 
@@ -255,21 +254,12 @@ class BaseTrainer(ABC):
             self.logger.info(self.tracker.log())                    # 记录度量信息
             pbar.close()      # 关闭进度条实例
 
-    def post_epoch_hook(self, epoch):
-        """Hook for post-epoch stage.
-        Args:
-            epoch: current epoch
-        """
-        pass
-
-    # 开始培训过程 ★★★★★
+    # 开始训练过程 ★★★★★
     def train(self, data_root, **kwargs):
         """Start training process.  开始培训过程 ★★★★★
-
         Args:
             data_root: path to dataset, should contain a subdirectory named 'train'
                 (and optionally 'val')  应该包含一个名为“train”的子目录（ 可选'val'）
-
         Kwargs (optional):
             metrics: a list of functions for computing metrics  用于计算指标的函数列表
             checkpoint: path to checkpoint for resuming training
@@ -316,7 +306,6 @@ class BaseTrainer(ABC):
                 num_workers=os.cpu_count())
 
         self.logger.info(underline('\nTraining Stage', '='))
-
         self.metric_funcs = self.kwargs.get('metrics')    #度量函数
 
         epochs = self.kwargs.get('epochs')
@@ -329,16 +318,14 @@ class BaseTrainer(ABC):
             self.train_one_epoch(no_val=(not val_path.exists()))
             self.post_epoch_hook(epoch)
 
-            # save metrics to csv file 保存度量到CSV文件
-            self.tracker.save()
-            # save learning curves 保存学习曲线
-            record.plot_learning_curves(self.tracker.save_path)
+            self.tracker.save()  # 保存度量到CSV文件
+            record.plot_learning_curves(self.tracker.save_path)  # 保存学习曲线
 
             # save checkpoints for resuming training  保存检查点以便恢复训练
             ckpt_path = self.record_dir / 'checkpoints' / f'ckpt.{epoch:04d}.pth'
             self.save_checkpoint(ckpt_path, epoch=epoch,optimizer_state_dict=self.optimizer.state_dict())
 
-            # remove previous checkpoints 删除以前的检查点
+            # 删除以前的检查点
             # for ckpt_path in sorted((self.record_dir / 'checkpoints').glob('*.pth'))[:-1]:
             #     os.remove(ckpt_path)
 
@@ -346,12 +333,10 @@ class BaseTrainer(ABC):
 
     def evaluate(self, pred, target=None, verbose=False):
         """Running several metrics to evaluate model performance.  运行多个度量来评估模型性能。
-
         Args:
             pred: prediction of size (B, H, W), either torch.Tensor or numpy array  预测 size: (B, H, W)，
             target: ground truth of size (B, H, W), either torch.Tensor or numpy array 地面真实size:(B, H, W)
             verbose: whether to show progress bar  Verbose:是否显示进度条  . 猜想B为batchsize的大小？
-
         Returns:
             metrics: a dictionary containing all metrics metrics:包含所有度量标准的字典
         """
