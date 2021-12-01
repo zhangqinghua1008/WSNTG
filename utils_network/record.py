@@ -19,20 +19,22 @@ from torchvision import utils as vutils
 
 matplotlib.use('Agg')
 
+def chk_mkdir(dir_path):
+    """ Creates folders if they do not exist. """
+    if not dir_path.exists():
+        dir_path.mkdir()
+
 # 主备记录路径
 def prepare_record_dir():
     """Create new record directory and return its path. 创建新的记录目录并返回其路径 """
 
-    # record_root = Path.home() / 'records'  # 系统用户目录 （cz源代码）
-    # record_root = Path.cwd() / 'records'  # path.cwd() = 运行原始py文件的当前目录（不是该文件的原始目录）  .parent 父目录
-    record_root = Path('D:/组会内容/实验报告/TGCN/') / 'records'  # zqh, 存放recoder的地址
-    if os.environ.get('RECORD_ROOT'):
-        record_root = Path(os.environ.get('RECORD_ROOT')).expanduser()
+    # record_root = Path('D:/组会内容/实验报告/MedT') / 'records'/'1-fast_test'  #存放recoder的地址
+    record_root = Path('D:/组会内容/实验报告/MedT') / 'records'  #存放recoder的地址
 
     if not record_root.exists():
         record_root.mkdir()
 
-    record_dir = record_root / datetime.now().strftime('%Y%m%d-%I%M-%p')
+    record_dir = record_root / datetime.now().strftime('%Y%m%d-%H%M-%p')  # %H 24小时制
 
     if not record_dir.exists():
         record_dir.mkdir()
@@ -62,7 +64,6 @@ def copy_source_files(record_dir):
     """Copy all source scripts to record directory for reproduction.
         复制所有源脚本到记录目录进行复制
     """
-
     source_dir = record_dir / 'source'
     if source_dir.exists():
         rmtree(source_dir)
@@ -90,7 +91,7 @@ def plot_learning_curves(history_path):
     for key in history.columns:
         if key.startswith('val_'):
             if key.replace('val_', '') not in history.columns:
-                # plot metrics computed only on validation phase  plot度量仅在验证阶段
+                # plot metrics computed only on validation phase  plot度量,仅有验证阶段
                 plt.figure(dpi=200)
                 plt.title('Model ' + key.replace('val_', ''))
                 plt.plot(history[key])
@@ -115,9 +116,8 @@ def plot_learning_curves(history_path):
         plt.savefig(curves_dir / f'{key}.png')
         plt.close()
 
-def save_preAndTarge(record_dir, pred, target ,index):
-    """Save experiment parameters to record directory.
-        保存实验参数到记录目录,保存为一个json文件  """
+def save_preAndMask(record_dir, pred, target ,index):
+    """ 保存模型pre 和 对应的mask  """
     img_dir = record_dir / 'pre_output'
 
     if not img_dir.exists():
@@ -125,5 +125,5 @@ def save_preAndTarge(record_dir, pred, target ,index):
 
     pred_save = pred.clone().detach().to(torch.device('cpu')).float()
     target_save = target.clone().detach().to(torch.device('cpu')).float()
-    vutils.save_image(pred_save, Path.joinpath(img_dir,str(index) + ".bmp"))
-    vutils.save_image(target_save, Path.joinpath(img_dir,str(index) + "_mask.bmp"))
+    vutils.save_image(pred_save, Path.joinpath(img_dir,str(index) + ".png"))
+    vutils.save_image(target_save, Path.joinpath(img_dir,str(index) + "_mask.png"))
