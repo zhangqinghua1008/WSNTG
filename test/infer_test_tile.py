@@ -65,12 +65,12 @@ def run():
 
 # 执行像素级别推理
 def pixel_run():
-    checkpoint = Path(r"D:\组会内容\实验报告\MedT\records\20211125-2209-PM\checkpoints/ckpt.0067.pth")
+    checkpoint = Path(r"D:\组会内容\实验报告\MedT\records\20211201-1034-AM\checkpoints/ckpt.0020.pth")
     model_type = 'tgcn'  # wesup / tgcn
     patch_size = 800
     resize_size = 280  # None
 
-    test_model = 'all'  # fast || all
+    test_model = 'fast'  # fast || all
 
     output_dir = checkpoint.parent.parent / 'results'
     output_dir.mkdir(exist_ok=True)
@@ -95,12 +95,14 @@ def pixel_run():
     if checkpoint is not None:
         model.load_state_dict(torch.load(checkpoint)['model_state_dict'])
 
+    # 推理
     pixel_infer(model,data_dir,patch_size = patch_size ,output_dir=output_dir,resize_size=resize_size,device=device)
 
+    print("\ncheckpoint:",checkpoint,"\n")
     # GT 地址
     lable_dir = data_dir + "/labelcol"
     # 评价模型输出
-    evaluate_img(modelPre_dir = output_dir, gt_lable_dir = lable_dir)
+    evaluate_img(modelPre_dir = output_dir, gt_lable_dir = lable_dir,need_post = True)
 
 
 if __name__ == '__main__':

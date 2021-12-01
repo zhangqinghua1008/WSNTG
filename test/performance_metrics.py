@@ -118,7 +118,7 @@ def run_post(pre_dir,post_dir):
 
 
 # 评价模型预测出的图像指标
-def evaluate_img(modelPre_dir,gt_lable_dir):
+def evaluate_img(modelPre_dir,gt_lable_dir,need_post = False):
     '''
         modelPre_dir : 模型预测输出地址
         gt_lable_dir : 真实标签地址
@@ -128,20 +128,21 @@ def evaluate_img(modelPre_dir,gt_lable_dir):
     pre_dir = modelPre_dir / "_pre"
     performance_metrics(pre_dir, gt_lable_dir)
 
-    # 后处理地址
-    post_dir = modelPre_dir / "_post"
     # 执行后处理
-    run_post(pre_dir, post_dir)
-    # 比较后处理后图像指标
-    performance_metrics(post_dir, gt_lable_dir)
+    if need_post:
+        # 后处理地址
+        post_dir = modelPre_dir / "_post"
+        run_post(pre_dir, post_dir)
+        # 比较后处理后图像指标
+        performance_metrics(post_dir, gt_lable_dir)
 
     print("花费：", time.time() - start)  # 不open():272   把小图进行open_3 : 250  大图open_30,小图open_4:252
 
 
 if __name__ == '__main__':
 
-    modelPre_dir = r"D:\组会内容\实验报告\MedT\records\Digestpath_WSI_results_Tgcn\all_test/"  # 模型预测输出地址
-    lable_dir = r"D:\组会内容\data\Digestpath2019\MedT\test\all_test" + "/labelcol"
+    modelPre_dir = Path(r"D:\组会内容\实验报告\MedT\records\20211130-0044-AM\results\all_test")  # 模型预测输出地址
+    lable_dir = Path(r"D:\组会内容\data\Digestpath2019\MedT\test\all_test" + "/labelcol")
 
-    evaluate_img(modelPre_dir,lable_dir)
+    evaluate_img(modelPre_dir,lable_dir,need_post=True)
 
