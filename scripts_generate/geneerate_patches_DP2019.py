@@ -23,6 +23,7 @@ import shutil
 import math
 import random
 from itertools import product
+import math
 
 
 def resize_img(img, target_size):
@@ -140,21 +141,34 @@ def process_img_and_mask(img_path, mask_path, target_img_dir, target_mask_dir, n
     name = img_path.name
     suffix = img_path.suffix  # 后缀
 
+    select_num = round( max(h//patch_size,w//patch_size)*2.2 ) # 被挑选的数量  -> *2=3533 张  *2.2 -> 3883
+    # select_num = math.ceil( pow((h/patch_size)*(w/patch_size),0.45)) # 被挑选的数量 -> 1085张
+    n_patches = max(n_patches, select_num)
+
     for n in range(n_patches):
         if need_filter:
-            # 筛选前景
-            count = 0
-            while count <= 4:
-                rand_i = int(np.random.randint(0, h - patch_size - 0))
-                rand_j = int(np.random.randint(0, w - patch_size - 0))
-                img_patch = img[rand_i:rand_i + patch_size, rand_j:rand_j + patch_size]
-                mask_patch = mask[rand_i:rand_i + patch_size, rand_j:rand_j + patch_size]
-                # if img_patch.mean()<233:
-                if mask_patch.mean() > 13 and mask_patch.mean() < 255:
-                    break
-                count += 1
-            if count > 4:  # 找了次还没找到，说明难找
-                continue
+            if n<=n_patches*0.7: # 0.75 选mask就行
+                # 筛选前景
+                count = 0
+                while count <= 3:
+                    rand_i = int(np.random.randint(0, h - patch_size - 0))
+                    rand_j = int(np.random.randint(0, w - patch_size - 0))
+                    img_patch = img[rand_i:rand_i + patch_size, rand_j:rand_j + patch_size]
+                    mask_patch = mask[rand_i:rand_i + patch_size, rand_j:rand_j + patch_size]
+                    if img_patch.mean()>231:  # 筛选前景.选到前景就再来一次
+                        continue
+                    # 找到有mask的
+                    if mask_patch.mean() > 13 and mask_patch.mean() < 255:
+                        break
+                    count += 1
+            else:  # 剩下0.25 选前景就行
+                while True:
+                    rand_i = int(np.random.randint(0, h - patch_size - 0))
+                    rand_j = int(np.random.randint(0, w - patch_size - 0))
+                    img_patch = img[rand_i:rand_i + patch_size, rand_j:rand_j + patch_size]
+                    mask_patch = mask[rand_i:rand_i + patch_size, rand_j:rand_j + patch_size]
+                    if img_patch.mean()<231:  # 筛选前景.选到前景就再来一次
+                        break
         else:
             rand_i = int(np.random.randint(100, h - patch_size - 100))
             rand_j = int(np.random.randint(100, w - patch_size - 100))
@@ -166,7 +180,7 @@ def process_img_and_mask(img_path, mask_path, target_img_dir, target_mask_dir, n
         io.imsave(str(target_mask_dir / patch_name), mask_patch, check_contrast=False)
 
 
-def process_img_and_mask_neg(img_path, target_img_dir, target_mask_dir, n_patches=6, need_filter=False):
+def process_img_and_mask_neg(img_path, target_img_dir, target_mask_dir, n_patches=2, need_filter=True):
     '''
          在neg类中 随机挑选patch
          # need_filter : 需要筛选（也就是选取有意义patch）
@@ -177,9 +191,13 @@ def process_img_and_mask_neg(img_path, target_img_dir, target_mask_dir, n_patche
     name = img_path.name
     suffix = img_path.suffix  # 后缀
 
-    n_patches = max(n_patches,int( (h/patch_size)*(w/patch_size))//4 )
+    # select_num = int( (h/patch_size)*(w/patch_size))//4 # 被挑选的数量
+    # select_num = math.ceil ( max(h//patch_size,w//patch_size) ) # 被挑选的数量  -> 1261 张
+    select_num = round( max(h//patch_size,w//patch_size) ) # 被挑选的数量  -> 1261 张
+    # select_num = math.ceil( pow((h/patch_size)*(w/patch_size),0.45)) # 被挑选的数量 -> 1085张
+    n_patches = max(n_patches, select_num)
 
-    if (h + 50) < patch_size or (w + 50) < patch_size:
+    if (h + 20) < patch_size or (w + 20) < patch_size:
         return
 
     mask = np.zeros((patch_size, patch_size)).astype('uint8')
@@ -190,7 +208,7 @@ def process_img_and_mask_neg(img_path, target_img_dir, target_mask_dir, n_patche
                 rand_i = int(np.random.randint(0, h - patch_size))
                 rand_j = int(np.random.randint(0, w - patch_size))
                 img_patch = img[rand_i:rand_i + patch_size, rand_j:rand_j + patch_size]
-                if img_patch.mean() < 233:
+                if img_patch.mean() < 230:
                     break
         else:
             rand_i = int(np.random.randint(50, h - patch_size))
@@ -225,12 +243,11 @@ def run(dataset_path, output, class_type="pos", need_filter=False):
     executor = Parallel(n_jobs=12)
     # POS
     if class_type == "pos":
-        executor(delayed(process_img_and_mask_all)(img_path, mask_path, target_img_dir, target_mask_dir, n_patches=9,
+        executor(delayed(process_img_and_mask)(img_path, mask_path, target_img_dir, target_mask_dir, n_patches=5,
                                                need_filter=need_filter)
                  for img_path, mask_path in tqdm(zip(img_paths, mask_paths), total=len(img_paths)))
     elif class_type == "neg":
-        executor(delayed(process_img_and_mask_neg)(img_path, target_img_dir, target_mask_dir, n_patches=4,
-                                                   need_filter=need_filter)
+        executor(delayed(process_img_and_mask_neg)(img_path, target_img_dir, target_mask_dir, n_patches=2)
                  for img_path in tqdm(img_paths, total=len(img_paths)))
 
 # 查看pos里面patch 有mask的patch有多少个
@@ -240,8 +257,8 @@ def count_mask(mask_dir):
     mask_paths = sorted(mask_dir.iterdir())
     for mask_path in tqdm(mask_paths):
         mask = io.imread(mask_path)
-        # if mask.mean() > 13 and mask.mean() < 255:
-        if mask.mean() > 15 and mask.mean() < 255:
+        if mask.mean() > 14 and mask.mean() < 255:
+        # if mask.mean() > 15 and mask.mean() < 255:
             count+=1
     print(count)
     print("mask所占比例：",count/len(mask_paths))
@@ -251,34 +268,34 @@ if __name__ == '__main__':
     patch_size = 800  # 切分patch的大小
 
     # ---------------------------  训练集
-    pos_dataset_path = r"D:\组会内容\data\Digestpath2019\Colonoscopy_tissue_segment_dataset\pos"  # 训练集 WSI 地址
-    pos_output =r"D:\组会内容\data\Digestpath2019\MedT\train\all_foreground\patch_800\train/pos_800"     # 训练集patch输出地址
-
-    neg_dataset_path = r"D:\组会内容\data\Digestpath2019\Colonoscopy_tissue_segment_dataset\neg"
-    neg_output =r"D:\组会内容\data\Digestpath2019\MedT\train\all_foreground\patch_800\train/neg_800"     # 输出地址
+    # pos_dataset_path = r"D:\组会内容\data\Digestpath2019\Colonoscopy_tissue_segment_dataset\pos"  # 训练集 WSI 地址
+    # pos_output =Path(r"D:\组会内容\data\Digestpath2019\MedT\train\all_foreground\patch_800\train/pos_800")     # 训练集patch输出地址
+    #
+    # neg_dataset_path = r"D:\组会内容\data\Digestpath2019\Colonoscopy_tissue_segment_dataset\neg"
+    # neg_output =Path(r"D:\组会内容\data\Digestpath2019\MedT\train\all_foreground\patch_800\train/neg_800")     # 输出地址
     # ----------------------------
 
     # --------------------------- val集
-    # pos_dataset_path = r"D:\组会内容\data\Digestpath2019\tissue-testset-final\pos"
-    # pos_output = r"D:\组会内容\data\Digestpath2019\MedT\val\only_mask/pos_800"  # 输出地址
+    pos_dataset_path = r"D:\组会内容\data\Digestpath2019\tissue-testset-final\pos"
+    pos_output = Path(r"D:\组会内容\data\Digestpath2019\MedT\train\all_foreground\patch_800\val/pos_800")  # 输出地址
     #
-    # neg_dataset_path = r"D:\组会内容\data\Digestpath2019\tissue-testset-final\neg"
-    # neg_output = r"D:\组会内容\data\Digestpath2019\MedT\val\only_mask/neg_800"  # 输出地址
+    neg_dataset_path = r"D:\组会内容\data\Digestpath2019\tissue-testset-final\neg"
+    neg_output =Path(r"D:\组会内容\data\Digestpath2019\MedT\train\all_foreground\patch_800\val/neg_800")  # 输出地址
     # ---------------------------
 
 
-    # run(pos_dataset_path, pos_output, class_type="pos", need_filter=True)  # 处理pos样本
-    # run(neg_dataset_path, neg_output, class_type="neg", need_filter=True)  # 处理neg样本
+    run(pos_dataset_path, pos_output, class_type="pos", need_filter=True)  # 处理pos样本
+    run(neg_dataset_path, neg_output, class_type="neg", need_filter=True)  # 处理neg样本
 
 
     # print("合并输出___")
-    save_output = r"D:\组会内容\data\Digestpath2019\MedT\train\all_foreground\patch_800\train"  # 合并输出地址
+    save_output = pos_output.parent # 合并输出地址
     move_fire(ori_path = pos_output,save_path = save_output,suffix="")  # 转移pos
     move_fire(ori_path = neg_output,save_path = save_output,suffix="")  # 转移neg
 
     # 计算pos中mask所占比例
-    mask_dir= r"D:\组会内容\data\Digestpath2019\MedT\train\all_foreground\patch_800\train\pos_800\labelcol"
-    # count_mask(mask_dir)
+    mask_dir= pos_output / "labelcol"
+    count_mask(mask_dir)
 
 
 
