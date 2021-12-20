@@ -18,18 +18,17 @@ from .gcn_layers import AdaptiveGraphRecursiveConvolution
 
 from artificially_feature import art_features
 from handler import _preprocess_superpixels,_cross_entropy
-from handler import _adj,art_adj,smoothness_reg
+from handler import _adj,art_adj,smoothness_reg,load_model_weights
 
 
 class TGCNConfig(BaseConfig):
     """Configuration for TGCN model. 为TGCN型配置 """
 
     # Rescale factor to subsample input images. 重新缩放因子的子样本输入图像。
-    # rescale_factor = 0.5
-    rescale_factor = 0.5   #zqh
+    rescale_factor = 0.35   #zqh
 
     # multi-scale range for training  多尺度范围训练
-    multiscale_range = (0.3, 0.4)
+    multiscale_range = (0.25, 0.45)
 
     # Number of target classes.
     n_classes = 2
@@ -38,7 +37,7 @@ class TGCNConfig(BaseConfig):
     class_weights = (3, 1)  # default = (3,1)
 
     # Superpixel parameters.
-    sp_area = 200   # 50 / 200
+    sp_area = 300   # 50 / 200
     sp_compactness = 40
 
     # Optimization parameters.
@@ -88,13 +87,38 @@ class TGCN(nn.Module):
         # 此时fm_channels_sum = 2112，VGG16总的特征维度为4224，因为每次做了sude_conv卷积除2，所以才是2112
 
         # fully-connected layers for dimensionality reduction  全连接层降维
-        self.fc_layers = nn.Sequential(
-            nn.Linear(self.fm_channels_sum, 1024),
+        # self.fc_layers = nn.Sequential(
+        #     nn.Linear(self.fm_channels_sum, 1024),
+        #     nn.ReLU(),
+        #     nn.Linear(1024, 1024),
+        #     nn.ReLU(),
+        #     nn.Linear(1024, D),
+        #     nn.ReLU()
+        # )
+
+        # 对 low 和 height进行 降维
+        self.fc_layers_low = nn.Sequential(
+            nn.Linear(self.fm_channels_sum//2, 512),
+            # nn.BatchNorm1d(512),
             nn.ReLU(),
-            nn.Linear(1024, 1024),
+            nn.Linear(512, 512),
+            # nn.BatchNorm1d(512),
             nn.ReLU(),
-            nn.Linear(1024, D),
+            nn.Linear(512, 12),
+            # nn.BatchNorm1d(12),
             nn.ReLU()
+        )
+
+        self.fc_layers_hight = nn.Sequential(
+            nn.Linear(self.fm_channels_sum//2, 512),
+            # nn.BatchNorm1d(512),
+            nn.ReLU(),
+            nn.Linear(512, 512),
+            # nn.BatchNorm1d(512),
+            nn.ReLU(),
+            nn.Linear(512, 20),
+            # nn.BatchNorm1d(20),
+            nn.ReLU( )
         )
 
         # final softmax classifier
@@ -105,6 +129,7 @@ class TGCN(nn.Module):
 
         # ============================= 图网络初始化
         #  层次化特征图
+        self.sp_features_bn = nn.BatchNorm1d(32)
         self.gcn_nfeat = D
         self.gcn_nhid = D*2  # 隐藏层层数
         self.adj_len = 2     # adj长度(也就是有几个图)
@@ -116,14 +141,14 @@ class TGCN(nn.Module):
                                                      net_input_dim=self.gcn_nfeat,
                                                      out_features_dim=self.gcn_out_dim,
                                                      len = self.adj_len, bias=True)
-        self.dropout = 0.8      # 图网络dropout 比例
+        self.dropout = 0.1      # 图网络dropout 比例
         self.gcn_output = None  # 图网络output
         self.adj_list = None
 
         # ------ ---------- ----手工特征图
         self.artificial_features = None
         self.art_gcn_nfeat = 1
-        self.art_gcn_nhid = 2 * 2  # 隐藏层层数
+        self.art_gcn_nhid = 4   # 隐藏层层数
         self.art_adj_len = 1  # adj长度(也就是有几个图)
         self.art_gcn_out_dim = 2
         self.art_gc1 = AdaptiveGraphConvolution(in_features_dim=self.art_gcn_nfeat,
@@ -186,12 +211,24 @@ class TGCN(nn.Module):
         x, sp_maps = x
         n_superpixels, height, width = sp_maps.size()  # n_superpixels:超像素个数, height,width 高,宽
 
-        # 构建手工特征
+        # 构建全局手工特征
         if self.kwargs.get('is_gcn'):
             art_feas = art_features(x)
-            # print(art_feas)
-            self.artificial_features = torch.from_numpy(art_feas).cuda().to(torch.float32)
+            art_feas = torch.from_numpy(art_feas).cuda().to(torch.float32)
+            art_feas = torch.sigmoid(art_feas)
+            self.artificial_features = art_feas
             self.artificial_features.requires_grad = True
+
+            # --------------- 全局手工特征 构建多图
+            art_adj_list = art_adj(self.artificial_features)  # 获得手工特征adj列表
+            self.art_adj_list = art_adj_list
+
+            art_g1 = F.relu(self.art_gc1(self.artificial_features, art_adj_list))
+            art_g1 = F.dropout(art_g1, 0, training=self.training)
+            art_g2 = self.art_gc2(art_g1, self.artificial_features, art_adj_list)
+            # art_gcn_out = F.softmax(art_g2, dim=1)
+            art_gcn_out = F.sigmoid(art_g2)
+            self.art_gcn_output = art_gcn_out
 
         # extract conv feature maps and flatten 提取卷积特征图并flatten
         self.feature_maps = None
@@ -204,12 +241,22 @@ class TGCN(nn.Module):
         x = torch.mm(sp_maps, x.t())                 # 矩阵相乘, 得到size(N,fm_channels_sum)  ps: x.t()转置
 
         # 利用全连通层降低超像素特征维数 reduce superpixel feature dimensions with fully connected layers
-        x = self.fc_layers(x)       # reduce,得到size(N ,D),D=32
-        self.sp_features = x       # 得到超像素特征
+        # x = self.fc_layers(x)       # reduce,得到size(N ,D),D=32
+        # self.sp_features = x  # 得到超像素特征
+
+        # ======= 把层次化特征分开 分成low / height
+        low_fetures = x[:,:self.fm_channels_sum//2]
+        height_fetures = x[:, self.fm_channels_sum//2: ]
+        # 利用全连通层降低超像素特征维数
+        x_low = self.fc_layers_low(low_fetures)  # reduce,得到size(N ,12)
+        x_height = self.fc_layers_hight(height_fetures)  # reduce,得到size(N ,20)
+        x = torch.cat((x_low, x_height), dim=1)
+        self.sp_features = x  # 得到超像素特征
 
         # TGCN =============
         if self.kwargs.get('is_gcn'):
             # --------------- 层次化特征 构建多图
+            self.sp_features = self.sp_features_bn(self.sp_features)  # 先对超像素特征进行批标准化
             adj_list = _adj(self.sp_features)    # 获得adj列表  sp_features:(N,32) -> adj.size: (N,N) -> adj_list:[adj1,adj2]
             self.adj_list = adj_list
 
@@ -221,16 +268,6 @@ class TGCN(nn.Module):
             # gcn_out = torch.nn.functional.sigmoid(g2)
             self.gcn_output = gcn_out
 
-            # --------------- 手工特征 构建多图
-            art_adj_list = art_adj(self.artificial_features) # 获得手工特征adj列表
-            self.art_adj_list = art_adj_list
-
-            art_g1 = F.relu(self.art_gc1(self.artificial_features, art_adj_list))
-            art_g1 = F.dropout(art_g1, 0 , training=self.training)
-            art_g2 = self.art_gc2(art_g1, self.artificial_features, art_adj_list)
-            # art_gcn_out = F.softmax(art_g2, dim=1)
-            art_gcn_out = F.sigmoid(art_g2)
-            self.art_gcn_output = art_gcn_out
         # ========================
 
         # classify each superpixel  每个superpixel分类
@@ -303,9 +340,9 @@ class TGCNTrainer(BaseTrainer):
             weight_decay=self.kwargs.get('weight_decay'),
         )
         scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
-            optimizer, 'min', patience=10, factor=0.5, min_lr=1e-5, verbose=True)
+            optimizer, 'min', patience=4, factor=0.5, min_lr=1e-5, verbose=True)
 
-        return optimizer, None
+        return optimizer, scheduler
 
     # 预处理,包含超像素分割等  img(1(batch_size),3,W,H)   point_mask/pixel_mask: (1,2(类别),W,H)
     def preprocess(self, *data):
@@ -352,7 +389,7 @@ class TGCNTrainer(BaseTrainer):
         '''
             target=(pixel_mask,sp_labels)
             pixel_mask (1,C(分类数),W,H),  sp_labels(SP_Number,C)  '''
-        _, sp_labels = target
+        _, sp_labels = target  # _ 为像素级标签
 
         # sp_features = self.model.sp_features  # self.model = TGCN,之前标签传递要用到。现在用不到。
         sp_pred = self.model.sp_pred
@@ -367,7 +404,8 @@ class TGCNTrainer(BaseTrainer):
         labeled_num = sp_labels.size(0)
 
         if labeled_num < total_num: # weakly-supervised mode  weakly-supervised模式(点注释模式)
-            loss = self.xentropy(sp_pred[:labeled_num], sp_labels)   # 只取已标注的超像素进行loss计算
+            loss = self.xentropy(sp_pred[:labeled_num], sp_labels,
+                                 class_weights=torch.Tensor(self.kwargs.get('class_weights')).to("cuda"))   # 只取已标注的超像素进行loss计算
             if metrics is not None and isinstance(metrics, dict):
                 metrics['labeled_sp_ratio'] = labeled_num / total_num    # 已标注的超像素比例
         else:  # fully-supervised mode 全监督模式
@@ -379,13 +417,15 @@ class TGCNTrainer(BaseTrainer):
             gcn_out = self.model.gcn_output
             tgcn_loss = smoothness_reg(gcn_out, self.model.adj_list )
             regloss = self.kwargs.get('gcn_smooth_reg_weight') * tgcn_loss
-            # self.logger.info( '正则化损失：',regloss.item())
+            regloss = regloss.clamp(0.001, 0.3)  # 限制范围
+            loss += regloss
 
+            # 手工特征单独构图损失
             art_gcn_out = self.model.art_gcn_output
             art_gcn_loss = smoothness_reg(art_gcn_out, self.model.art_adj_list)
-            # art_regloss = self.kwargs.get('gcn_smooth_reg_weight') * art_gcn_loss
-            art_regloss = art_gcn_loss
-            loss += (regloss+art_regloss)
+            art_regloss = 0.1 * art_gcn_loss
+            art_regloss = art_regloss.clamp(0.001,0.3)  # 限制范围
+            loss += art_regloss
 
         # clear outdated superpixel prediction 清除过时的超像素预测
         self.model.sp_pred = None
@@ -402,7 +442,8 @@ class TGCNTrainer(BaseTrainer):
     def postprocess(self, pred, target=None):
         pred = pred.round().long()  # round(): 返回一个新张量，将pred张量每个元素舍入到最近的整数
         if target is not None:
-            return pred, target[0].argmax(dim=1)
+            pixel_mask, _ = target
+            return pred, pixel_mask.argmax(dim=1)
         return pred
 
     def post_epoch_hook(self, epoch):
@@ -424,12 +465,11 @@ class TGCNPixelInference(TGCN):
         """Initialize a TGCN model.
         Kwargs:
             n_classes: number of target classes (default to 2)
-            D: output dimension of superpixel features
+            D: output dimension of superpixel features 超像素特征的输出维度
         Returns:
-            model: a new TGCN model
+            model: a new WESUP model
         """
         super().__init__()
-
         self.kwargs = kwargs
         self.backbone = models.vgg16(pretrained=True).features
 
@@ -443,28 +483,48 @@ class TGCNPixelInference(TGCN):
                 setattr(self, f'side_conv{self.fm_channels_sum}',
                         nn.Conv2d(layer.out_channels, layer.out_channels // 2, 1))
                 self.fm_channels_sum += layer.out_channels // 2
+        # 此时fm_channels_sum = 2112，VGG16总的特征维度为4224，因为每次做了sude_conv卷积除2，所以才是2112
 
         # fully-connected layers for dimensionality reduction 全连接层降维
-        self.fc_layers = nn.Sequential(
-            nn.Linear(self.fm_channels_sum, 1024),
+        self.fc_layers_low = nn.Sequential(
+            nn.Linear(self.fm_channels_sum//2, 512),
+            # nn.BatchNorm1d(512),
             nn.ReLU(),
-            nn.Linear(1024, 1024),
+            nn.Linear(512, 512),
+            # nn.BatchNorm1d(512),
             nn.ReLU(),
-            nn.Linear(1024, D),
+            nn.Linear(512, 12),
+            # nn.BatchNorm1d(12),
             nn.ReLU()
         )
 
+        self.fc_layers_hight = nn.Sequential(
+            nn.Linear(self.fm_channels_sum//2, 512),
+            # nn.BatchNorm1d(512),
+            nn.ReLU(),
+            nn.Linear(512, 512),
+            # nn.BatchNorm1d(512),
+            nn.ReLU(),
+            nn.Linear(512, 20),
+            # nn.BatchNorm1d(20),
+            nn.ReLU( )
+        )
+
+
         # final softmax classifier
         self.classifier = nn.Sequential(
-            nn.Linear(D, self.kwargs.get('n_classes', 2)),
+            nn.Linear(D, 2),
             nn.Softmax(dim=1)
         )
 
         # ============================= 图网络初始化
+        #  层次化特征图
+        self.sp_features_bn = nn.BatchNorm1d(32)
         self.gcn_nfeat = D
-        self.gcn_nhid = D*2
-        self.adj_len = 2
+        self.gcn_nhid = D*2  # 隐藏层层数
+        self.adj_len = 2     # adj长度(也就是有几个图)
         self.gcn_out_dim = 2
+
         self.gc1 = AdaptiveGraphConvolution(in_features_dim  = self.gcn_nfeat,
                                             out_features_dim = self.gcn_nhid,
                                             len = self.adj_len, bias=True)
@@ -472,9 +532,25 @@ class TGCNPixelInference(TGCN):
                                                      net_input_dim=self.gcn_nfeat,
                                                      out_features_dim=self.gcn_out_dim,
                                                      len = self.adj_len, bias=True)
-        self.dropout = 0.8      # 图网络dropout 比例
+        self.dropout = 0.1      # 图网络dropout 比例
         self.gcn_output = None  # 图网络output
         self.adj_list = None
+
+        # ------ ---------- ----手工特征图
+        self.artificial_features = None
+        self.art_gcn_nfeat = 1
+        self.art_gcn_nhid = 4  # 隐藏层层数
+        self.art_adj_len = 1  # adj长度(也就是有几个图)
+        self.art_gcn_out_dim = 2
+        self.art_gc1 = AdaptiveGraphConvolution(in_features_dim=self.art_gcn_nfeat,
+                                                out_features_dim=self.art_gcn_nhid,
+                                                len=self.art_adj_len, bias=True)
+        self.art_gc2 = AdaptiveGraphRecursiveConvolution(in_features_dim=self.art_gcn_nhid,
+                                                         net_input_dim=self.art_gcn_nfeat,
+                                                         out_features_dim=self.art_gcn_out_dim,
+                                                         len=self.adj_len, bias=True)
+        self.art_gcn_output = None  # 图网络output
+        self.art_adj_list = None
         # ============================= =============================
 
         # store conv feature maps 存储conv特性映射
@@ -512,8 +588,17 @@ class TGCNPixelInference(TGCN):
         self.feature_maps = None
         _ = self.backbone(x)
         x = self.feature_maps
-        x = x.view(x.size(0), -1)
-        x = self.fc_layers(x.t())
+        x = x.view(x.size(0), -1)  # x -> torch.Size([2112, 78400]) ( 也就是【fm_channels_sum,W*H】)
+        x = x.t()
+        # x = self.fc_layers(x.t())
+
+        # ======= 把层次化特征分开 分成low / height
+        low_fetures = x[:, :self.fm_channels_sum // 2]
+        height_fetures = x[:, self.fm_channels_sum // 2:]
+        # 利用全连通层降低超像素特征维数 reduce superpixel feature dimensions with fully connected layers
+        x_low = self.fc_layers_low(low_fetures)  # reduce,得到size(N ,D),D=32
+        x_height = self.fc_layers_hight(height_fetures)  # reduce,得到size(N ,D),D=32
+        x = torch.cat((x_low, x_height), dim=1)
 
         x = self.classifier(x)
         return x.view(height, width, -1)
