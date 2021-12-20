@@ -67,8 +67,8 @@ def _cross_entropy(y_hat, y_true, class_weights=None, epsilon=1e-7):
     """Semi-supervised cross entropy loss function. 半监督交叉熵损失函数。
     Args:
         y_hat: prediction tensor with size (N, C), where C is the number of classes 预测张量,size:(N, C)，C是类的数量
-        y_true: label tensor with size (N, C). A sample won't be counted into loss
-            if its label is all zeros.    标注张量,size:(N, C)。如果它的标签全是0,样本不会计入损失
+        y_true: label tensor with size (N, C). A sample won't be counted into loss if its label is all zeros.
+               标注张量,size:(N, C)。如果它的标签全是0,样本不会计入损失
         class_weights: class weights tensor with size (C,)  具有大小(C，)的类权张量
         epsilon: numerical stability term   数值稳定的术语
     Returns:
@@ -112,7 +112,14 @@ def _adj(sp_features):
 # 手工特征邻接矩阵
 def art_adj(art_features):
     # adj.size: (9,)
-    adj1 = torch.ones((9,9)).to(torch.float32).cuda()
+    # adj1 = torch.ones((9,9)).to(torch.float32).cuda()
+    # return [adj1]
+
+    # feature affinity matrix  特征关联矩阵
+    # features - features.unsqueeze(1): size(N,N,D)
+    adj1 = torch.exp(-torch.einsum('ijk,ijk->ij',    # 爱因斯坦求和 （einsum）
+                                art_features - art_features.unsqueeze(1),
+                                art_features - art_features.unsqueeze(1)))
     return [adj1]
 
 # def smoothness_reg(gcn_out, adj_list, loss, reg_scalar):
@@ -132,3 +139,15 @@ def smoothness_reg(gcn_out, adj_list):
         pre_reg = tr / float(gcn_out.size()[0] * gcn_out.size()[1])
         loss+= pre_reg
     return loss
+
+
+# 读取resnet 参数
+def load_model_weights(model, weights):
+    model_dict = model.state_dict()
+    weights = {k: v for k, v in weights.items() if k in model_dict}
+    if weights == {}:
+        print('No weight could be loaded..')
+    model_dict.update(weights)
+    model.load_state_dict(model_dict)
+
+    return model
