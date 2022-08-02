@@ -16,25 +16,28 @@ from models.base import BaseConfig, BaseTrainer
 from .gcn_layers import AdaptiveGraphConvolution
 from .gcn_layers import AdaptiveGraphRecursiveConvolution
 
-from artificially_feature import art_features
-from handler import _preprocess_superpixels,_cross_entropy
-from handler import _adj,art_adj,smoothness_reg,load_model_weights
+from .artificially_feature import art_features
+from .handler import _preprocess_superpixels,_cross_entropy
+from .handler import _adj,art_adj,smoothness_reg,load_model_weights
+from .handler import tgcn_propagation
 
 
 class TGCNConfig(BaseConfig):
     """Configuration for TGCN model. 为TGCN型配置 """
 
     # Rescale factor to subsample input images. 重新缩放因子的子样本输入图像。
-    rescale_factor = 0.35   #zqh
+    # rescale_factor = 0.35   #zqh DP2019
+    rescale_factor = 0.5   #SICAPV2
 
     # multi-scale range for training  多尺度范围训练
-    multiscale_range = (0.25, 0.45)
+    # multiscale_range = (0.25, 0.45)  # DP2019
+    multiscale_range = (0.4, 0.6)  # DP2019
 
     # Number of target classes.
     n_classes = 2
 
     # Class weights for cross-entropy loss function.  交叉熵损失函数的类权值
-    class_weights = (3, 1)  # default = (3,1)
+    class_weights = (2, 1)  # default = (3,1)
 
     # Superpixel parameters.
     sp_area = 300   # 50 / 200
@@ -51,9 +54,13 @@ class TGCNConfig(BaseConfig):
     batch_size = 1
     epochs = 200
 
-    lr = 6e-4  # 6e-4
+    lr = 8e-4  # 6e-4
+    # lr = 1e-3  # 6e-4
+
+
 
     is_gcn = True
+    is_propagated = False
     # Weight for TGCN  when computing loss function 计算损失时 tgcn的正则化loss权重
     # 'reg_scalar', 1e-05, 'Weight of smoothness regularizer.')  # 平滑权值正则化器
     # gcn_smooth_reg_weight = 1e-05   # 平滑度调整
@@ -85,16 +92,6 @@ class TGCN(nn.Module):
                         nn.Conv2d(layer.out_channels, layer.out_channels // 2, 1) )   # 指定side_conv{int} = Conv2d(64, 32, kernel_size=(1, 1), stride=(1, 1))
                 self.fm_channels_sum += layer.out_channels // 2
         # 此时fm_channels_sum = 2112，VGG16总的特征维度为4224，因为每次做了sude_conv卷积除2，所以才是2112
-
-        # fully-connected layers for dimensionality reduction  全连接层降维
-        # self.fc_layers = nn.Sequential(
-        #     nn.Linear(self.fm_channels_sum, 1024),
-        #     nn.ReLU(),
-        #     nn.Linear(1024, 1024),
-        #     nn.ReLU(),
-        #     nn.Linear(1024, D),
-        #     nn.ReLU()
-        # )
 
         # 对 low 和 height进行 降维
         self.fc_layers_low = nn.Sequential(
@@ -256,7 +253,7 @@ class TGCN(nn.Module):
         # TGCN =============
         if self.kwargs.get('is_gcn'):
             # --------------- 层次化特征 构建多图
-            self.sp_features = self.sp_features_bn(self.sp_features)  # 先对超像素特征进行批标准化
+            # self.sp_features = self.sp_features_bn(self.sp_features)  # 先对超像素特征进行批标准化
             adj_list = _adj(self.sp_features)    # 获得adj列表  sp_features:(N,32) -> adj.size: (N,N) -> adj_list:[adj1,adj2]
             self.adj_list = adj_list
 
@@ -340,7 +337,7 @@ class TGCNTrainer(BaseTrainer):
             weight_decay=self.kwargs.get('weight_decay'),
         )
         scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
-            optimizer, 'min', patience=4, factor=0.5, min_lr=1e-5, verbose=True)
+            optimizer, 'min', patience=7, factor=0.5, min_lr=1e-5, verbose=True)
 
         return optimizer, scheduler
 
@@ -414,11 +411,27 @@ class TGCNTrainer(BaseTrainer):
         regloss = 0
         #=================== TGCN 正则化损失
         if self.kwargs.get('is_gcn'):
+            # 超像素特征多图损失
             gcn_out = self.model.gcn_output
-            tgcn_loss = smoothness_reg(gcn_out, self.model.adj_list )
-            regloss = self.kwargs.get('gcn_smooth_reg_weight') * tgcn_loss
-            regloss = regloss.clamp(0.001, 0.3)  # 限制范围
-            loss += regloss
+            # 通过有标签的样本进行计算tgcn_loss
+            tgcn_loss_label = 0.3 * self.xentropy(gcn_out[:labeled_num], sp_labels)  # 只取已标注的超像素进行loss计算
+            tgcn_loss_label = tgcn_loss_label.clamp(0.00001, 0.3)  # 限制范围
+            loss += tgcn_loss_label
+            metrics['gcn_loss'] = tgcn_loss_label.item()
+
+            tgcn_propagate_loss = 0
+            if self.kwargs.get('is_propagated'):
+                # 然后通过TGCN进行标签扩散，对backbone进行微调
+                tgcn_propagated_labels = tgcn_propagation(gcn_out,labeled_num)
+                tgcn_propagate_loss = 1 * self.xentropy(sp_pred[labeled_num:], tgcn_propagated_labels)  # 只取已标注的超像素进行loss计算
+                tgcn_propagate_loss = tgcn_propagate_loss.clamp(0.001, 0.4)  # 限制范围
+                loss += tgcn_propagate_loss
+
+                metrics['tgcn_propagate_number'] = tgcn_propagated_labels.sum().item()
+                metrics['tgcn_propagate_loss'] = tgcn_propagate_loss.item()
+            else:
+                metrics['tgcn_propagate_number'] = 0
+                metrics['tgcn_propagate_loss'] = 0
 
             # 手工特征单独构图损失
             art_gcn_out = self.model.art_gcn_output
@@ -426,6 +439,7 @@ class TGCNTrainer(BaseTrainer):
             art_regloss = 0.1 * art_gcn_loss
             art_regloss = art_regloss.clamp(0.001,0.3)  # 限制范围
             loss += art_regloss
+            metrics['art_regloss'] = art_regloss.item()
 
         # clear outdated superpixel prediction 清除过时的超像素预测
         self.model.sp_pred = None
@@ -437,7 +451,7 @@ class TGCNTrainer(BaseTrainer):
         self.model.art_gcn_output = None
         self.model.art_adj_list = None
 
-        return loss,regloss,art_regloss
+        return loss
 
     def postprocess(self, pred, target=None):
         pred = pred.round().long()  # round(): 返回一个新张量，将pred张量每个元素舍入到最近的整数
@@ -542,13 +556,13 @@ class TGCNPixelInference(TGCN):
         self.art_gcn_nhid = 4  # 隐藏层层数
         self.art_adj_len = 1  # adj长度(也就是有几个图)
         self.art_gcn_out_dim = 2
-        self.art_gc1 = AdaptiveGraphConvolution(in_features_dim=self.art_gcn_nfeat,
-                                                out_features_dim=self.art_gcn_nhid,
-                                                len=self.art_adj_len, bias=True)
-        self.art_gc2 = AdaptiveGraphRecursiveConvolution(in_features_dim=self.art_gcn_nhid,
-                                                         net_input_dim=self.art_gcn_nfeat,
-                                                         out_features_dim=self.art_gcn_out_dim,
-                                                         len=self.adj_len, bias=True)
+        # self.art_gc1 = AdaptiveGraphConvolution(in_features_dim=self.art_gcn_nfeat,
+        #                                     out_features_dim=self.art_gcn_nhid,
+        #                                     len=self.art_adj_len, bias=True)
+        # self.art_gc2 = AdaptiveGraphRecursiveConvolution(in_features_dim=self.art_gcn_nhid,
+        #                                              net_input_dim=self.art_gcn_nfeat,
+        #                                              out_features_dim=self.art_gcn_out_dim,
+        #                                              len=self.adj_len, bias=True)
         self.art_gcn_output = None  # 图网络output
         self.art_adj_list = None
         # ============================= =============================
@@ -558,6 +572,13 @@ class TGCNPixelInference(TGCN):
 
         # spatial size of first feature map 第一个特征图的空间大小
         self.fm_size = None
+
+        # label propagation input features 标签传播输入特性. (超像素特征)
+        self.sp_features = None
+
+        # superpixel predictions (tracked to compute loss) 超像素预测(跟踪以计算损失
+        self.sp_pred = None
+
 
     def _hook_fn(self, _, input_, output):
         if self.feature_maps is None:

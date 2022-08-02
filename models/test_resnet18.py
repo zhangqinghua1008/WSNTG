@@ -22,6 +22,7 @@ from base import BaseConfig, BaseTrainer
 
 import segmentation_models_pytorch as smp
 from model_utils.summary import summary
+from net_structure import vgg_conv,vgg_one_conv,vgg_classifier
 
 def _preprocess_superpixels(segments, mask=None, epsilon=1e-7):
     """Segment superpixels of a given image and return segment maps and their labels.
@@ -180,7 +181,7 @@ class TEST_RESNET18Config(BaseConfig):
     rescale_factor = 0.5
 
     # multi-scale range for training  多尺度范围训练
-    multiscale_range = (0.5, 0.5)
+    multiscale_range = (1, 1)
 
     # Number of target classes.
     n_classes = 2
@@ -189,7 +190,7 @@ class TEST_RESNET18Config(BaseConfig):
     class_weights = (3, 1)
 
     # Superpixel parameters.
-    sp_area = 50   # 50 / 200
+    sp_area = 200   # 50 / 200
     sp_compactness = 40
 
     # Weight for label-propagated samples when computing loss function 计算损时 标签传播样本的权重
@@ -209,7 +210,7 @@ class TEST_RESNET18Config(BaseConfig):
     batch_size = 1
     epochs = 200
 
-    lr = 5e-4
+    lr = 1e-3  # 5e-4
 
 
 class TEST_RESNET18(nn.Module):
@@ -248,9 +249,9 @@ class TEST_RESNET18(nn.Module):
         self.fc_layers = nn.Sequential(
             nn.Linear(self.fm_channels_sum, 1024),
             nn.ReLU(),
-            nn.Linear(1024, 1024),
+            nn.Linear(1024, 512),
             nn.ReLU(),
-            nn.Linear(1024, D),
+            nn.Linear(512, D),
             nn.ReLU()
         )
 
@@ -258,6 +259,10 @@ class TEST_RESNET18(nn.Module):
             nn.Linear(D, self.kwargs.get('n_classes', 2)),
             nn.Softmax(dim=1)
         )
+
+        self.vgg_conv = vgg_conv()
+        self.one_conv = vgg_one_conv()
+        self.vgg_classifier = vgg_classifier()
 
         # store conv feature maps 存储conv特性映射
         self.feature_maps = None
@@ -323,6 +328,17 @@ class TEST_RESNET18(nn.Module):
         # 利用全连通层降低超像素特征维数
         x = self.fc_layers(x)
         self.sp_features = x
+
+        # 降维后加VGG层
+        # [num,128] -> [num,1,128,128]
+        # x = x.view((n_superpixels, 32, 32))
+        # x = x.unsqueeze(dim=1)
+        #
+        # x = self.vgg_conv(x)
+        # x = self.one_conv(x)  # 用1*1卷积
+        # x = x.view(x.size(0), -1)
+        # self.sp_pred = self.vgg_classifier(x)
+        # ++++++++++++++++++++++++++++++++++++++++++++++
 
         # classify each superpixel  每个superpixel分类
         self.sp_pred = self.classifier(x)
@@ -494,7 +510,7 @@ class TEST_RESNET18Trainer(BaseTrainer):
             self.scheduler.step(labeled_loss)
 
 
-# if __name__ == '__main__':
-#     model = TEST_RESNET18().cuda()
-#
-#     summary( model, (3,512,512) )
+if __name__ == '__main__':
+    model = TEST_RESNET18().cuda()
+
+    summary( model, (3,512,512) )

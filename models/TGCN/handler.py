@@ -122,6 +122,7 @@ def art_adj(art_features):
                                 art_features - art_features.unsqueeze(1)))
     return [adj1]
 
+# 拉普拉斯正则化
 # def smoothness_reg(gcn_out, adj_list, loss, reg_scalar):
 def smoothness_reg(gcn_out, adj_list):
     loss = 0
@@ -140,6 +141,26 @@ def smoothness_reg(gcn_out, adj_list):
         loss+= pre_reg
     return loss
 
+
+def tgcn_propagation(gcn_out,labeled_num, threshold=0.93):
+    '''
+        gcn_out: [N_sp,2]
+        y_l : [N_label_sp,2]
+    '''
+
+    # number of labeled and unlabeled samples  贴有标签和未贴有标签的样品数量
+    n_l = labeled_num  # 有标签的数量； n_label
+    n_u = gcn_out.size(0) - n_l  # n_unlabel
+
+    # initialize y_u with zeros  用零初始化y_u,torch.Size([233, 2])
+    # y_u : 未标记像本的y
+    y_u = torch.zeros(n_u, 2).to(gcn_out.device)
+    for index,one_out in enumerate(gcn_out):
+        # max_p,index = one_out.max(dim=0)
+        # 大于阈值
+        if index>=n_l and max(one_out)>threshold:
+            y_u[index-n_l][one_out.argmax()] = 1
+    return y_u
 
 # 读取resnet 参数
 def load_model_weights(model, weights):

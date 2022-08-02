@@ -10,7 +10,7 @@ from torchvision import models
 
 from utils_network import empty_tensor
 from utils_network import is_empty_tensor
-from utils_network.data import Digest2019PointDataset
+from utils_network.data import Digest2019PointDataset,PointSupervisionDataset
 from utils_network.data import SegmentationDataset
 from .base import BaseConfig, BaseTrainer
 
@@ -18,11 +18,9 @@ from .base import BaseConfig, BaseTrainer
     修改wesup 超像素map存储方式 和 处理方式。
 """
 
-
 def _preprocess_superpixels(segments, mask=None, epsilon=1e-7):
     """Segment superpixels of a given image and return segment maps and their labels.
         给定图像的分段超像素，并return 分段映射(segment maps)及其标签。
-
     Args:
         segments: slic segments tensor with shape (H, W)   (H,W)大小的slic分割张量,每个像素一个超像素的编号（slic segments tensor）
         mask (optional): annotation mask tensor with shape (C, H, W). Each pixel is a one-hot
@@ -31,8 +29,7 @@ def _preprocess_superpixels(segments, mask=None, epsilon=1e-7):
     Returns:
         sp_maps: superpixel maps with shape (N, H, W)
         sp_labels: superpixel labels with shape (N_l, C), where N_l is the number of labeled samples.
-
-        sp_maps: 具有形状(N, H, W)的超像素映射
+        sp_maps: 具有形状(N, H, W)的超像素映射 -> sp_maps_size(SP_Number,x,2)
         sp_labels: 具有形状(N_l, C)的超像素标签，其中N_l为已标记样本的数量。
     """
 
@@ -41,17 +38,17 @@ def _preprocess_superpixels(segments, mask=None, epsilon=1e-7):
 
     if mask is not None and not is_empty_tensor(mask):
         def compute_superpixel_label(sp_idx):
-            sp_mask = (mask * (segments == sp_idx).long()).float()
+            sp_mask = (mask * (segments == sp_idx).long()).float()   #TODO: 做的什么操作？
             return sp_mask.sum(dim=(1, 2)) / (sp_mask.sum() + epsilon)   # epsilon 避免出现0的情况
 
         # compute labels for each superpixel  计算每个超像素的标签-》 [0,1]之间的一个值
         sp_labels = torch.cat([
             compute_superpixel_label(sp_idx).unsqueeze(0)
             for sp_idx in range(segments.max() + 1)
-        ])  # sp_labels shape: [sp_N, 2] ,sp_N 是超像素个数, 代表超像素为每一类的概率
+        ])  # sp_labels shape: [sp_N, 2] ,sp_N 是超像素个数, 代表超像素为每一类的概率(根据超像素中点标记的类别个数的对比)
 
         # move labeled superpixels to the front of `sp_idx_list` 将带标签的超像素移到' sp_idx_list '的前面
-        labeled_sps = (sp_labels.sum(dim=-1) > 0).nonzero().flatten()
+        labeled_sps = (sp_labels.sum(dim=-1) > 0).nonzero().flatten()  # 选择有标记的数据，选择依据：有类别的概率
         unlabeled_sps = (sp_labels.sum(dim=-1) == 0).nonzero().flatten()
         sp_idx_list = torch.cat([labeled_sps, unlabeled_sps])
 
@@ -63,12 +60,19 @@ def _preprocess_superpixels(segments, mask=None, epsilon=1e-7):
     else:  # no supervision provided  没有提供监督
         sp_labels = empty_tensor().to(segments.device)
 
-    # stacking normalized superpixel segment maps 叠加归一化超像素段映射
+    # stacking normalized superpixel segment maps 叠加归一化超像素段映射 -> sp_maps具有形状(N, H, W)的超像素映射
     sp_maps = segments == sp_idx_list[:, None, None]
     sp_maps = sp_maps.squeeze().float()
 
+    sp_indexs = []
+    for index,sp in enumerate(sp_maps):
+        sp_index = []
+        for xy in sp.nonzero():
+            sp_index.append(xy)
+        sp_indexs.append(torch.stack(sp_index, dim=0))
+
     # make sure each superpixel map sums to one  确保每个超像素映射和为1
-    sp_maps = sp_maps / sp_maps.sum(dim=(1, 2), keepdim=True)
+    sp_maps = sp_maps / sp_maps.sum(dim=(1, 2), keepdim=True)  # TODO: 超像素区域/ 自己的超像素个数，让每个超像素为和为1
 
     return sp_maps, sp_labels
 
@@ -164,7 +168,7 @@ class WESUPConfig(BaseConfig):
     rescale_factor = 0.5
 
     # multi-scale range for training  多尺度范围训练
-    multiscale_range = (0.3, 0.4)
+    multiscale_range = (0.7, 0.9)
 
     # Number of target classes.
     n_classes = 2
@@ -300,7 +304,7 @@ class WESUP(nn.Module):
         x = x.view(x.size(0), -1)
 
         # calculate features for each superpixel 计算每个超像素的特征
-        sp_maps = sp_maps.view(sp_maps.size(0), -1)
+        sp_maps = sp_maps.view(sp_maps.size(0), -1)  # x_res = torch.einsum('kij,mij->kij',sp_maps,x_t) # size:[num,w,h]
         x = torch.mm(sp_maps, x.t())
 
         # reduce superpixel feature dimensions with fully connected layers
@@ -366,12 +370,6 @@ class WESUPPixelInference(WESUP):
         )
 
         # final softmax classifier
-        # self.classifier = nn.Sequential(
-        #     nn.Linear(D, D // 2),
-        #     nn.ReLU(),
-        #     nn.Linear(D // 2, self.kwargs.get('n_classes', 2)),
-        #     nn.Softmax(dim=1)
-        # )
         self.classifier = nn.Sequential(
             nn.Linear(D, self.kwargs.get('n_classes', 2)),
             nn.Softmax(dim=1)
@@ -458,8 +456,10 @@ class WESUPTrainer(BaseTrainer):
     def get_default_dataset(self, root_dir, train=True, proportion=1.0):
         if train:
             if os.path.exists(os.path.join(root_dir, 'points')):
-                return Digest2019PointDataset(root_dir, proportion=proportion,
-                                              multiscale_range=self.kwargs.get('multiscale_range'))
+                return PointSupervisionDataset(root_dir, proportion=proportion,
+                                               multiscale_range=self.kwargs.get('multiscale_range'))
+                # return Digest2019PointDataset(root_dir, proportion=proportion,
+                #                               multiscale_range=self.kwargs.get('multiscale_range'))
             return SegmentationDataset(root_dir, proportion=proportion,
                                        multiscale_range=self.kwargs.get('multiscale_range'))
         return SegmentationDataset(root_dir, rescale_factor=self.kwargs.get('rescale_factor'), train=False)
@@ -477,6 +477,7 @@ class WESUPTrainer(BaseTrainer):
         return optimizer, None
 
     # 预处理
+    #  Return: (网络输入的数据, target)
     def preprocess(self, *data):
         data = [datum.to(self.device) for datum in data]
         if len(data) == 3:
@@ -502,16 +503,17 @@ class WESUPTrainer(BaseTrainer):
             segments, dtype=torch.long, device=self.device)
 
         if point_mask is not None and not is_empty_tensor(point_mask):
-            mask = point_mask.squeeze()
+            mask = point_mask.squeeze()  # 点监督走这个[1, 2, w, h]->[2, w, h]
         elif pixel_mask is not None and not is_empty_tensor(pixel_mask):
             mask = pixel_mask.squeeze()
         else:
             mask = None
 
+        #segments.size():[78, 78]     mask.size(): [2, 78, 78]
         sp_maps, sp_labels = _preprocess_superpixels(
             segments, mask, epsilon=self.kwargs.get('epsilon'))
 
-        # img_size(1,3(3通道),W,H),sp_maps_size(SP_Number,W,H)
+        # img_size(1,3(3通道),W,H),   sp_maps_size(SP_Number,W,H)  - > sp_maps_size(SP_Number,x,2)
         # pixel_mask (1,C(分类数),W,H),  sp_labels(SP_Number,C)
         return (img, sp_maps), (pixel_mask, sp_labels)
 

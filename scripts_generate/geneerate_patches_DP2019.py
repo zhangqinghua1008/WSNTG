@@ -284,8 +284,8 @@ if __name__ == '__main__':
     # ---------------------------
 
 
-    run(pos_dataset_path, pos_output, class_type="pos", need_filter=True)  # 处理pos样本
-    run(neg_dataset_path, neg_output, class_type="neg", need_filter=True)  # 处理neg样本
+    # run(pos_dataset_path, pos_output, class_type="pos", need_filter=True)  # 处理pos样本
+    # run(neg_dataset_path, neg_output, class_type="neg", need_filter=True)  # 处理neg样本
 
 
     # print("合并输出___")

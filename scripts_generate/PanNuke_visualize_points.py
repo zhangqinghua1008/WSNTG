@@ -16,7 +16,7 @@ COLORS = (
 )
 
 parser = argparse.ArgumentParser()
-parser.add_argument('--point_root', default=r'D:\组会内容\data\PanNuke Dataset\Fold 1\data\points-0.0001',
+parser.add_argument('--point_root', default=r'D:\组会内容\data\HoVer_ConSep\consep_cut_500\Train\points-0.0001',
                     help='Path to point labels directory')
 parser.add_argument('-r', '--radius', type=int, default=5, help='圆半径')
 parser.add_argument('-o', '--output',
@@ -29,7 +29,7 @@ if not os.path.exists(output_dir):
     os.mkdir(output_dir)
 
 img_dir = os.path.join(os.path.dirname(args.point_root), 'images')
-mask_dir = os.path.join(os.path.dirname(args.point_root), 'masks','bi_png')
+mask_dir = os.path.join(os.path.dirname(args.point_root), 'masks')
 print(f'___Generating dot annotation visualizaion to {output_dir} ...')
 
 

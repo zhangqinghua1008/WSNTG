@@ -25,16 +25,20 @@ def chk_mkdir(dir_path):
         dir_path.mkdir()
 
 # 主备记录路径
-def prepare_record_dir():
+def prepare_record_dir(model_type):
     """Create new record directory and return its path. 创建新的记录目录并返回其路径 """
 
     # record_root = Path('D:/组会内容/实验报告/MedT') / 'records'/'1-fast_test'  #存放recoder的地址
-    record_root = Path('D:/组会内容/实验报告/MedT') / 'records'  #存放recoder的地址
+    if model_type == 'tgcn' or model_type == 'wesup':
+        record_root = Path('D:/组会内容/实验报告/MedT') / 'records_16/records'  # 存放recoder的地址
+    else:
+        record_root = Path('D:/组会内容/实验报告/MedT') / 'records_16/records' / '0对比算法'  #存放recoder的地址
+        # record_root = Path('D:/组会内容/实验报告/MedT') / 'records_SICAPV2' / '0对比算法'  #存放recoder的地址
 
     if not record_root.exists():
         record_root.mkdir()
 
-    record_dir = record_root / datetime.now().strftime('%Y%m%d-%H%M-%p')  # %H 24小时制
+    record_dir = record_root / ( datetime.now().strftime('%Y%m%d-%H%M-%p')+"_"+model_type )  # %H 24小时制
 
     if not record_dir.exists():
         record_dir.mkdir()
@@ -123,7 +127,7 @@ def save_preAndMask(record_dir, pred, target ,index):
     if not img_dir.exists():
         img_dir.mkdir()
 
-    pred_save = pred.clone().detach().to(torch.device('cpu')).float()
-    target_save = target.clone().detach().to(torch.device('cpu')).float()
+    pred_save = pred[0].clone().detach().to(torch.device('cpu')).float()
+    target_save = target[0].clone().detach().to(torch.device('cpu')).float()
     vutils.save_image(pred_save, Path.joinpath(img_dir,str(index) + ".png"))
     vutils.save_image(target_save, Path.joinpath(img_dir,str(index) + "_mask.png"))

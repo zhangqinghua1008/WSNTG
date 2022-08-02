@@ -40,24 +40,23 @@ def pixel_infer(model,data_dir,patch_size,resize_size=None,device='cuda',output_
 
 
 # 执行模型正常推理
-def infer_run(model_type = None):
-    checkpoint = Path(r"D:\组会内容\实验报告\MedT\records\20211203-2257-PM_sizeof\checkpoints/ckpt.0200.pth")
+def infer_run(model_type = None,checkpoint = None,
+              test_model = "fast",phases = ["pos"]):
+    begin = time.time()
     patch_size = 800
     resize_size = 400  # None
-
-    test_model = 'all'  # fast || all
 
     output_dir = checkpoint.parent.parent / 'results'
     output_dir.mkdir(exist_ok=True)
 
     # 10张图快速测试
     if test_model == 'fast':
-        data_dir = r"D:\组会内容\data\Digestpath2019\MedT\test\fast_test/"
+        data_dir = Path(r"D:\组会内容\data\Digestpath2019\MedT\test\fast_test/")
         output_dir = output_dir / "fast_test"
         output_dir.mkdir(exist_ok=True)
     # 完整90张测试图片
     elif test_model == 'all':
-        data_dir = r"D:\组会内容\data\Digestpath2019\MedT\test\all_test/"
+        data_dir = Path(r"D:\组会内容\data\Digestpath2019\MedT\test\all_test/")
         output_dir = output_dir / "all_test"
         output_dir.mkdir(exist_ok=True)
 
@@ -66,26 +65,35 @@ def infer_run(model_type = None):
     trainer = initialize_trainer(model_type, device=device)
     if checkpoint is not None:
         trainer.load_checkpoint(checkpoint)
-    infer(trainer,data_dir,patch_size = patch_size ,output_dir=output_dir,resize_size=resize_size,device=device)
 
-    # -- 测指标
-    print("\ncheckpoint:", checkpoint, "\n")
-    lable_dir = data_dir + "/labelcol"  # GT 地址
-    evaluate_img(modelPre_dir=output_dir, gt_lable_dir=lable_dir, need_post=True)  # 评价模型输出
+    # 推理
+    for phase in phases:
+        print("\n++++++++++++++++++++ 当前正在处理：", phase)
+        phase_data_dir = data_dir / phase
+        phase_output_dir = output_dir / phase
+        phase_output_dir.mkdir(exist_ok=True)
 
+        infer(trainer,phase_data_dir,patch_size = patch_size ,output_dir=phase_output_dir,resize_size=resize_size,device=device)
+        print("\ncheckpoint:", checkpoint, "\n")
+        # 评价模型输出
+        phase_lable_dir = phase_data_dir / "labelcol"  # GT 地址
+        evaluate_img(modelPre_dir=phase_output_dir, gt_lable_dir=phase_lable_dir, need_post=True)
+        print("时间：", time.time() - begin)
 
 # 执行像素级别推理
-def infer_pixel_run(model_type = 'tgcn'):  # wesup / tgcn
+def infer_pixel_run(model_type = 'tgcn',checkpoint = None,
+                    test_model = "fast",phases = ["pos"]):
+    '''
+        model_type : wesup / tgcn
+        test_model : fast || all
+        phases = ["pos","neg"]  # 测试类型    ["pos","neg"] || ["neg"] || ["pos"]
+    '''
     begin = time.time()
-    checkpoint = Path(r"D:\组会内容\实验报告\MedT\records\20211205-0043-AM\checkpoints/ckpt.0025.pth")
     patch_size = 800
     resize_size = 280  # None
 
-    test_model = 'fast'  # fast || all
-
-    output_dir = checkpoint.parent.parent / 'results'
+    output_dir = checkpoint.parent.parent / ('results_'+checkpoint.stem[-4:])
     output_dir.mkdir(exist_ok=True)
-
     # 10张图快速测试
     if test_model =='fast':
         data_dir = Path(r"D:\组会内容\data\Digestpath2019\MedT\test\fast_test/")
@@ -107,7 +115,6 @@ def infer_pixel_run(model_type = 'tgcn'):  # wesup / tgcn
         model.load_state_dict(torch.load(checkpoint)['model_state_dict'])
 
     # 推理
-    phases = ["pos","neg"]
     for phase in phases:
         print("\n++++++++++++++++++++ 当前正在处理：",phase)
         phase_data_dir = data_dir / phase
@@ -119,12 +126,25 @@ def infer_pixel_run(model_type = 'tgcn'):  # wesup / tgcn
         print("\ncheckpoint:", checkpoint, "\n")
         # 评价模型输出
         phase_lable_dir = phase_data_dir / "labelcol"  # GT 地址
-        evaluate_img(modelPre_dir=phase_output_dir, gt_lable_dir=phase_lable_dir, need_post=False)
+        evaluate_img(modelPre_dir=phase_output_dir, gt_lable_dir=phase_lable_dir, need_post=True)
+        print("时间：",time.time()-begin)
 
 
 if __name__ == '__main__':
-    # 执行像素级别推理 （只有tgcn 和 wesup需要）
-    infer_pixel_run(model_type='tgcn')
 
-    # 正常模型推理
-    # infer_run(model_type='sizeloss')  # cdws / sizeloss
+    model_type = "unet"     # sizeloss || unet / fcn / cdws
+    test_model = "all"     # fast || all
+    phases = ["pos","neg"]  # 测试类型    ["pos","neg"] || ["neg"] || ["pos"]
+
+    ckpts = ["ckpt.0071.pth","ckpt.0073.pth"]
+    for ckpt in ckpts:
+        checkpoint = Path(r"D:\组会内容\实验报告\MedT\records_SICAPV2\0对比算法\20220112-1731-PM_unet") / "checkpoints" / ckpt
+
+        if model_type == "tgcn" or model_type == "wesup":
+            # 执行像素级别推理
+            infer_pixel_run(model_type=model_type,checkpoint=checkpoint,
+                            test_model=test_model,phases=phases)
+        else:
+            # 正常模型推理
+            infer_run(model_type=model_type,checkpoint=checkpoint,
+                            test_model=test_model,phases=phases)

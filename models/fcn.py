@@ -3,12 +3,21 @@ import torch
 import torch.nn as nn
 
 from utils_network.data import SegmentationDataset
+# from .base import BaseConfig, BaseTrainer
 from .base import BaseConfig, BaseTrainer
+from torchsummary import summary
 
 
 class FCNConfig(BaseConfig):
     n_classes = 2
-    target_size = (320, 320)
+    # target_size = (320, 320)
+    target_size = (256, 256)
+
+    batch_size = 16
+
+    lr = 8e-4  # 6e-4
+
+    epochs = 200
 
     # Optimization parameters. 优化参数
     momentum = 0.9
@@ -118,7 +127,7 @@ class FCNTrainer(BaseTrainer):
     def get_default_optimizer(self):
         optimizer = torch.optim.SGD(
             filter(lambda p: p.requires_grad, self.model.parameters()),
-            lr=1e-3,
+            lr=self.kwargs.get('lr'),
             momentum=0.9,
             weight_decay=self.kwargs.get('weight_decay'),
         )
@@ -155,3 +164,8 @@ class FCNTrainer(BaseTrainer):
             loss = np.mean(self.tracker.history['loss'])
 
             self.scheduler.step(loss)
+
+# if __name__ == '__main__':
+#     model = FCN32s().cuda()
+#
+#     summary(model,(3,288,288))

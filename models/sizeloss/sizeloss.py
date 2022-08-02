@@ -24,16 +24,18 @@ class SizeLossConfig(BaseConfig):
     constraint = 'individual'
 
     # Input spatial size.
-    input_size = (400, 400)
+    input_size = (256, 256)
+    batch_size = 8
+    epochs = 200
 
     # Positive constant that weights the importance of constraints.
-    lambda_ = 0.01
+    lambda_ = 0.005
 
     # Radius of circle around point annotations
     point_radius = 5
 
     # Initial learning rate.
-    initial_lr = 0.0001
+    initial_lr =  8e-4  # 6e-4
 
     # numerical stability term
     epsilon = 1e-7
@@ -84,7 +86,7 @@ class SizeLossTrainer(BaseTrainer):
                                      lr=self.kwargs.get('initial_lr'),
                                      betas=(0.9, 0.99))
         scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
-            optimizer, 'min', patience=100, factor=0.5, min_lr=1e-5, verbose=True)
+            optimizer, 'min', patience=15, factor=0.5, min_lr=1e-5, verbose=True)
 
         return optimizer, scheduler
 
@@ -122,4 +124,4 @@ class SizeLossTrainer(BaseTrainer):
             if self.model.training:
                 target = target[0]
             return pred.argmax(dim=1), target.argmax(dim=1)
-        return pred
+        return pred.argmax(dim=1)

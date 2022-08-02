@@ -11,6 +11,7 @@ import torch
 import torchvision.transforms.functional as TF
 from pathlib import Path
 from skimage import io
+import matplotlib.pyplot as plt
 
 smooth = 1e-5
 
@@ -19,6 +20,7 @@ def Hi(hist, img):
     hi = hist / (img.shape[0] * img.shape[1])
     return hi
 
+# ---------------------------------- 一整张图的情况
 # =================== 颜色特征
 def colour_feature(gray):
     hist_gray = cv2.calcHist([gray], [0], None, [256], [0, 255])
@@ -26,7 +28,7 @@ def colour_feature(gray):
 
     # gray_mean:均值, gray_var:标准差
     gray_mean, gray_var = cv2.meanStdDev(gray)
-    gray_mean, gray_var = gray_mean+smooth, gray_var+smooth
+    gray_mean, gray_var = (gray_mean+smooth), (gray_var+smooth)
     # peak
     gray_peak = 0
     for i, h_i in enumerate(h_gray):
@@ -43,7 +45,7 @@ def colour_feature(gray):
             gray_entropy += h_i * np.log2(h_i)
     gray_entropy = -gray_entropy + smooth
 
-    all_colour = [gray_mean[0], gray_var[0], gray_peak[0], gray_energy, gray_entropy]
+    all_colour = [gray_mean[0]/256, gray_var[0]/256, gray_peak[0], gray_energy, gray_entropy]
     all_colour = np.hstack(all_colour)
 
     return all_colour
@@ -131,13 +133,85 @@ def art_features(_img):
 
     gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
     colours = colour_feature(gray)
-    textures = texture_features(gray)
-    morphologicals = morphological_features(gray)
+    # textures = texture_features(gray)
+    # morphologicals = morphological_features(gray)
 
-    all = np.hstack( (colours,textures,morphologicals) )
-    all = np.vstack(all)
+    all = np.hstack( (colours) )  # 【1，9】
+    all = np.vstack(all)        # [9,1]
     all[np.isnan(all)] = smooth # 排除nan值
     return all
+
+# ----------------------------------------------------------------------
+from skimage.transform import resize
+from skimage.segmentation import slic
+def resize_img(img, target_size):
+    img = resize(img, target_size, order=1, anti_aliasing=False)
+    return (img * 255).astype('uint8')
+
+
+def segment(img):
+    sp_area = 200
+    segments = slic(
+        img.squeeze().cpu().numpy().transpose(1, 2, 0),
+        n_segments=int(img.size(-2) * img.size(-1) / sp_area),
+        compactness=40,
+    )
+    segments = torch.as_tensor(
+        segments, dtype=torch.long, device='cuda')
+
+    return segments
+
+
+# 输入进来的都是Tersor格式
+# sp_maps ： Tersor
+def sp_art(img_tersor,sp_maps_torch):
+    if torch.is_tensor(img_tersor):
+        img = img_tersor.clone()
+        img = img.squeeze().detach().cpu().numpy().transpose(1, 2, 0)
+        img = (img * 255).astype('uint8')
+    else:
+        img = img_tersor
+
+    if torch.is_tensor(sp_maps_torch):
+        sp_maps = sp_maps_torch.detach().cpu().numpy()
+    else:
+        sp_maps = sp_maps_torch
+
+    all_sp_features = []
+    sp_num = np.max(sp_maps) + 1
+    for sp_index in range(int(sp_num)):
+        sp_img = np.zeros_like(img)
+        sp_img[sp_maps == sp_index] = img[sp_maps == sp_index]
+
+        # plt.imshow(sp_img),plt.show()
+
+        # 切割超像素
+        m, n = np.where(sp_maps == sp_index)
+        sp_img = sp_img[min(m):max(m) + 1, min(n):max(n) + 1]
+
+        # plt.imshow(sp_img),plt.show()
+
+        sp_img = (sp_img).astype('uint8')  # sp_img = (sp_img * 255).astype('uint8')
+        sp_features = art_features(sp_img)
+        all_sp_features.append(sp_features)
+
+    return  np.array( all_sp_features )
+
+
+def sp_(img):
+    sp_segment = segment(img)
+    sp_num = torch.max(sp_segment) + 1
+    print("超像素个数：", sp_num)
+
+    sp_idx_list = sp_segment.unique()
+    sp_maps = sp_segment == sp_idx_list[:, None, None]
+    sp_maps = sp_maps.squeeze().float()  # size: (S_N,W,H)
+    print(sp_maps.shape)
+
+    sp_maps = sp_maps.view(sp_num, 270, 270).argmax(dim=0)  # size:(H,W)
+
+    all_sp_features = sp_art(img,sp_maps)
+    return  all_sp_features
 
 
 if __name__ == '__main__':
@@ -145,19 +219,35 @@ if __name__ == '__main__':
 
     dir = Path(r"D:\组会内容\data\Digestpath2019\MedT\train\only_mask\train_800\train\img")
     print(dir)
+
+    all = []
     for index,file in enumerate(dir.iterdir()):
         print(index,file)
         img = io.imread(file)
-        img = np.zeros_like(img)
+        img = resize_img(img,target_size=(270,270))
         img = TF.to_tensor(img).unsqueeze(0).cuda()
 
         features = art_features(img)
-        print(features)
-
         features = torch.from_numpy(features)
-        print(features.shape)
 
-        # if index>50:
-        break
+        # -----------超像素测试
+        sp_f = sp_(img)
+        np.set_printoptions(suppress=True, precision=4) # 保留4位
+        print("mean:",np.mean(sp_f,axis=0))
+        print("max ：",np.max(sp_f,axis=0))
+        print("min ：",np.min(sp_f,axis=0))
 
+        sp_f = torch.from_numpy(sp_f).cuda().to(torch.float32)
+        sp_f = torch.sigmoid(sp_f)
+        print("mean:", torch.mean(sp_f, axis=0))
+        print("max ：", torch.max(sp_f, axis=0))
+        print("min ：", torch.min(sp_f, axis=0))
+        if index>20:
+            break
+        # break
+    # np.set_printoptions(precision=4)  # 保留4位
+    # print("mean:",np.mean(all,axis=1))
+    # print("max ：",np.max(all,axis=1))
+    # print("min ：",np.min(all,axis=1))
+    #
     print("花费时间：", time.time() - start)

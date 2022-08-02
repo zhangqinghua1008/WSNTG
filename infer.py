@@ -14,7 +14,7 @@ import fire
 from tqdm import tqdm
 from PIL import Image
 from skimage.morphology import opening
-
+from skimage.io import imread
 from models import initialize_trainer
 from utils_network.data import SegmentationDataset
 
@@ -36,16 +36,14 @@ def predict_single_image(trainer, img, mask, output_size):
 
 def predict(trainer, dataset, input_size=None, scales=(0.5,),
             num_workers=4, device='cpu'):
-    """Predict on a directory of images.
-
+    """Predict on a directory of images.  对映像目录进行预测。
     Arguments:
         trainer: trainer instance (subclass of `models.base.BaseTrainer`)
         dataset: instance of `torch.utils.data.Dataset`
         input_size: spatial size of input image
-        scales: rescale factors for multi-scale inference
+        scales: rescale factors for multi-scale inference  多尺度推理的重标度因子
         num_workers: number of workers to load data
         device: target device
-
     Returns:
         predictions: list of model predictions of size (H, W)
     """
@@ -80,7 +78,8 @@ def predict(trainer, dataset, input_size=None, scales=(0.5,),
 
         prediction = prediction.squeeze().cpu().numpy()
 
-        # apply morphology postprocessing (i.e. opening) for multi-scale inference
+        # apply morphology postprocessing (i.e. opening) for multi-scale inference  应用形态学后处理(即开运算)进行多尺度推理
+        # opening (开运算) : 先腐蚀再膨胀，可以消除小物体或小斑块。
         if input_size is None and len(scales) > 1:
             def get_selem(size):
                 assert size % 2 == 1
@@ -97,28 +96,29 @@ def predict(trainer, dataset, input_size=None, scales=(0.5,),
 
 
 def save_predictions(predictions, dataset, output_dir='predictions'):
-    """Save predictions to disk.
-
+    """Save predictions to disk.  将预测保存到磁盘。
     Args:
         predictions: model predictions of size (N, H, W)
         dataset: dataset for prediction, used for naming the prediction output
         output_dir: path to output directory
     """
-
     print(f'\nSaving prediction to {output_dir} ...')
 
     output_dir = Path(output_dir)
     if not output_dir.exists():
         output_dir.mkdir()
 
-    for pred, img_path in tqdm(zip(predictions, dataset.img_paths), total=len(predictions)):
+    for pred, img_path,mask_path in tqdm(zip(predictions, dataset.img_paths, dataset.mask_paths), total=len(predictions)):
         pred = pred.astype('uint8')
-        Image.fromarray(pred * 255).save(output_dir / f'{img_path.stem}.png')
-
+        Image.fromarray(pred * 255).save(output_dir / f'{img_path.stem}.png')  # 保存预测
+        # if mask_path is not None: # 保存本来mask
+        #     mask = imread(str(mask_path))
+        # Image.fromarray(mask * 255).save(output_dir / f'{mask_path.stem}.png')
 
 def infer(trainer, data_dir, output_dir=None, input_size=None,
           scales=(0.5,), num_workers=4, device='cpu'):
-    """Making inference on a directory of images with given model checkpoint."""
+    """Making inference on a directory of images with given model checkpoint.
+        对给定模型检查点的图像目录进行推理。    """
 
     trainer.model.eval()
     dataset = SegmentationDataset(data_dir, train=False)
@@ -132,8 +132,13 @@ def infer(trainer, data_dir, output_dir=None, input_size=None,
     return predictions
 
 
-def main(data_dir, model_type='wesup', checkpoint=None, output_dir=None,
+def main(data_dir="", model_type='tgcn', checkpoint=None, output_dir=None,
          input_size=None, scales=(0.5,), num_workers=4, device=None):
+
+    data_dir = r"G:\py_code\pycharm_Code\WESUP-TGCN\data_glas\testB"
+    checkpoint = r"G:\py_code\pycharm_Code\WESUP-TGCN\records\\20210827-1036-PM\checkpoints\ckpt.0300.pth"
+    output_dir = r"G:\py_code\pycharm_Code\WESUP-TGCN\records\\20210827-1036-PM\output\testB"
+
     if output_dir is None and checkpoint is not None:
         checkpoint = Path(checkpoint)
         output_dir = checkpoint.parent.parent / 'results'

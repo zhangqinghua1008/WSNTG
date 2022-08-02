@@ -10,7 +10,7 @@ from infer import infer
 from models import initialize_trainer
 
 
-def test(ckpt_path, model_type='wesup', input_size=None, scales=(0.5,), device='cpu'):
+def test(ckpt_path, model_type='tgcn', input_size=None, scales=(0.5,), device='cpu'):
 
     ckpt_path = Path(ckpt_path)
     trainer = initialize_trainer(model_type, device=device)
@@ -28,12 +28,12 @@ def test(ckpt_path, model_type='wesup', input_size=None, scales=(0.5,), device='
 
     try:
         print('\nTesting on test set A ...')
-        data_dir = Path.home() / 'data' / 'GLAS_all' / 'testA'
+        data_dir = Path.home() / 'testA'
         output_dir = results_dir / 'testA'
         infer(trainer, data_dir, output_dir, input_size, scales, device=device)
 
         print('\nTesting on test set B ...')
-        data_dir = Path.home() / 'data' / 'GLAS_all' / 'testB'
+        data_dir = Path.home() / 'testB'
         output_dir = results_dir / 'testB'
         infer(trainer, data_dir, output_dir, input_size, scales, device=device)
     finally:
@@ -42,7 +42,7 @@ def test(ckpt_path, model_type='wesup', input_size=None, scales=(0.5,), device='
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument('-m', '--model', default='wesup',
+    parser.add_argument('-m', '--model', default='tgcn',
                         help='Which model to use')
     parser.add_argument('--input-size', help='Input size for model')
     parser.add_argument('--scales', default='0.6,0.55,0.5,0.45,0.4',

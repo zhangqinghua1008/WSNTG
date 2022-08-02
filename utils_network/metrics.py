@@ -9,6 +9,7 @@ import numpy as np
 from scipy import stats
 from scipy.spatial.distance import directed_hausdorff
 from skimage.measure import label
+from sklearn.metrics import confusion_matrix
 
 
 def convert_to_numpy(func):
@@ -41,6 +42,11 @@ def dice(S, G, epsilon=1e-7):
         S = S.unsqueeze(0) if len(S.size()) == 2 else S
         G = G.unsqueeze(0) if len(G.size()) == 2 else G
         S, G = S.float(), G.float()
+
+        if G.sum() == 0:  # 是阴性样本 .  则反转
+            S = (S < 0.5)
+            G = torch.ones_like(G)
+
         dice_score = 2 * (G * S).sum(dim=(1, 2)) / (G.sum(dim=(1, 2)) + S.sum(dim=(1, 2)) + epsilon)
         return dice_score.mean().item()
 
@@ -102,10 +108,9 @@ def detection_f1(S, G, overlap_threshold=0.5, epsilon=1e-7):
     elif num_S == 0 or num_G == 0:
         return 0
 
-    # matrix for identifying corresponding ground truth object in G
-    # for each segmented object in S (the 1st col contains labels of
-    # segmented objects, the 2nd col contains corresponding ground truth
-    # objects and the 3rd col is the true positive flags)
+    # matrix for identifying corresponding ground truth object in G for each segmented object in S
+    # (the 1st col contains labels of segmented objects, the 2nd col contains corresponding ground
+    # truth objects and the 3rd col is the true positive flags)
     tp_table = np.zeros((num_S, 3))
     tp_table[:, 0] = np.arange(1, num_S + 1)
 
@@ -287,6 +292,10 @@ def iou_score(output, target):
         output = torch.argmax(output, dim=1).data.cpu().numpy()
     if torch.is_tensor(target):
         target = target.data.cpu().numpy()
+
+    if target.sum()==0: # 是阴性样本 .  #反转
+       output = np.int64(output<0.5)
+       target = np.ones_like(target)
     output_ = output > 0.5
     target_ = target > 0.5
     intersection = (output_ & target_).sum()
@@ -294,8 +303,14 @@ def iou_score(output, target):
 
     return (intersection + smooth) / (union + smooth)
 
+    # dice = (2 * iou) / (iou + 1)
+    # return iou, dice
+
 # DICE
 def dice_coef(output, target): #output为预测结果 target为真实结果
+    '''
+        2*| A∩B|  /  (|A|+|B|)
+    '''
     smooth = 1e-5
 
     if torch.is_tensor(output):
@@ -303,7 +318,72 @@ def dice_coef(output, target): #output为预测结果 target为真实结果
     if torch.is_tensor(target):
         target = target.data.cpu().numpy()
 
-    intersection = (output * target).sum()
+    if target.sum()==0: # 是阴性样本 .  则反转
+       output = np.int64(output<0.5)
+       target = np.ones_like(target)
 
-    return (2. * intersection + smooth) / \
-        (output.sum() + target.sum() + smooth)
+    intersection = (output * target).sum()
+    all = output.sum() + target.sum()
+
+    return (2. * intersection + smooth) / (all + smooth)
+
+
+# 其中TPR即为敏感度（sensitivity）,SE
+def SE_sensitivity(output, target): #output为预测结果 target为真实结果
+    # TPR：true positive rate，描述识别出的所有正例占所有正例的比例 计算公式为：TPR= TP/ (TP+ FN)
+    smooth = 1e-5
+    if torch.is_tensor(output):
+        output = torch.argmax(output, dim=1).data.cpu().numpy()
+    if torch.is_tensor(target):
+        target = target.data.cpu().numpy()
+
+    if target.sum() == 0:  # 是阴性样本 .  则反转
+        output = np.int64(output < 0.5)
+        target = np.ones_like(target)
+
+     # TN|FP
+     # FN|TP
+    tn, fp, fn, tp = confusion_matrix(output, target)
+
+    return (tp + smooth) / (tp + fn + smooth)
+
+# TNR即为特异度（specificity）,
+def SP_specificity(output, target): #output为预测结果 target为真实结果
+    # sensitivity: TNR：true negative rate，描述识别出的负例占所有负例的比例
+    #   计算公式为：TNR= TN / (FP + TN)
+    smooth = 1e-5
+
+    if torch.is_tensor(output):
+        output = torch.argmax(output, dim=1).data.cpu().numpy()
+    if torch.is_tensor(target):
+        target = target.data.cpu().numpy()
+
+    if target.sum() == 0:  # 是阴性样本 .  则反转
+        output = np.int64(output < 0.5)
+        target = np.ones_like(target)
+
+    # TN|FP
+    # FN|TP
+    tn, fp, fn, tp = confusion_matrix(output, target)
+    return (tn + smooth) / (fp + tn + smooth)
+
+
+# jaccard_index  https://github.com/assassint2017/MICCAI-LITS2017/blob/master/utilities/calculate_metrics.py
+def jaccard_index(output, target):
+    """
+    :return: 杰卡德系数
+    """
+    smooth = 1e-5
+
+    if torch.is_tensor(output):
+        output = torch.argmax(output, dim=1).data.cpu().numpy()
+    if torch.is_tensor(target):
+        target = target.data.cpu().numpy()
+    if target.sum()==0: # 是阴性样本 .  则反转
+       output = np.int64(output<0.5)
+       target = np.ones_like(target)
+
+    intersection = (output * target).sum()
+    union = (output | target).sum()
+
+    return intersection / union

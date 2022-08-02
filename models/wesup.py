@@ -105,7 +105,6 @@ def _cross_entropy(y_hat, y_true, class_weights=None, epsilon=1e-7):
 def _label_propagate(features, y_l, threshold=0.95):
     """Perform random walk based label propagation with similarity graph.
        利用相似图进行基于随机游走的标签传播。
-
     Arguments:
         features: features of size (N, D), where N is the number of superpixels
             and D is the dimension of input features
@@ -117,7 +116,7 @@ def _label_propagate(features, y_l, threshold=0.95):
         threshold: 标签传播的相似阈值
     Returns:
         pseudo_labels: propagated label tensor of size (N, C)
-        pseudo_labels:  大小(N, C)的传播标号张量
+        pseudo_labels:  大小(N_unlabel, C)的传播标号张量
     """
 
     # disable gradient computation  禁用梯度计算
@@ -125,8 +124,8 @@ def _label_propagate(features, y_l, threshold=0.95):
     y_l = y_l.detach()             # torch.Size([23, 2])
 
     # number of labeled and unlabeled samples  贴有标签和未贴有标签的样品数量
-    n_l = y_l.size(0)
-    n_u = features.size(0) - n_l
+    n_l = y_l.size(0)  # 有标签的数量； n_label
+    n_u = features.size(0) - n_l # n_unlabel
 
     # feature affinity matrix  特征关联矩阵
     # features - features.unsqueeze(1): size(N,N,D) torch.Size([256, 256, 32])
@@ -159,19 +158,21 @@ class WESUPConfig(BaseConfig):
     """Configuration for WESUP model. 为WESUP模型配置 """
 
     # Rescale factor to subsample input images. 重新缩放因子的子样本输入图像。
-    rescale_factor = 0.5
+    # rescale_factor = 0.35   #zqh DP2019
+    rescale_factor = 0.5  # SICAPV2
 
     # multi-scale range for training  多尺度范围训练
-    multiscale_range = (0.3, 0.4)
+    # multiscale_range = (0.3, 0.4)
+    multiscale_range = (0.4, 0.6)  # DP2019
 
     # Number of target classes.
     n_classes = 2
 
     # Class weights for cross-entropy loss function.  交叉熵损失函数的类权值
-    class_weights = (3, 1)
+    class_weights = (1, 1)
 
     # Superpixel parameters.
-    sp_area = 100
+    sp_area = 300
     sp_compactness = 40
 
     # whether to enable label propagation  是否启用标签传播
@@ -187,7 +188,7 @@ class WESUPConfig(BaseConfig):
     # Optimization parameters.
     momentum = 0.9
     weight_decay = 0.001
-    lr = 1e-3  # 6e-4
+    lr = 8e-4  # 6e-4
 
     # Whether to freeze backbone. 是否冻结骨干网
     freeze_backbone = False
@@ -367,13 +368,6 @@ class WESUPPixelInference(WESUP):
             nn.ReLU()
         )
 
-        # final softmax classifier
-        # self.classifier = nn.Sequential(
-        #     nn.Linear(D, D // 2),
-        #     nn.ReLU(),
-        #     nn.Linear(D // 2, self.kwargs.get('n_classes', 2)),
-        #     nn.Softmax(dim=1)
-        # )
         self.classifier = nn.Sequential(
             nn.Linear(D, self.kwargs.get('n_classes', 2)),
             nn.Softmax(dim=1)
@@ -404,10 +398,8 @@ class WESUPPixelInference(WESUP):
 
     def forward(self, x):
         """Running a forward pass.
-
         Args:
             x: input image tensor of size (1, 3, H, W)
-
         Returns:
             pred: prediction with size (H, W, C)
         """
@@ -458,9 +450,7 @@ class WESUPTrainer(BaseTrainer):
     def get_default_dataset(self, root_dir, train=True, proportion=1.0):
         if train:
             if os.path.exists(os.path.join(root_dir, 'points')):
-                # return PointSupervisionDataset(root_dir, proportion=proportion,
-                #                               multiscale_range=self.kwargs.get('multiscale_range'))
-                return Digest2019PointDataset(root_dir, proportion=proportion,
+                return PointSupervisionDataset(root_dir, proportion=proportion,
                                               multiscale_range=self.kwargs.get('multiscale_range'))
             return SegmentationDataset(root_dir, proportion=proportion,
                                        multiscale_range=self.kwargs.get('multiscale_range'))
@@ -474,7 +464,7 @@ class WESUPTrainer(BaseTrainer):
             weight_decay=self.kwargs.get('weight_decay'),
         )
         scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
-            optimizer, 'min', patience=10, factor=0.5, min_lr=1e-5, verbose=True)
+            optimizer, 'min', patience=5, factor=0.5, min_lr=1e-5, verbose=True)
 
         return optimizer, None
 

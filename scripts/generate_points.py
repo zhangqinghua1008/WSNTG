@@ -10,6 +10,7 @@ from tqdm import tqdm
 from PIL import Image
 from skimage.measure import label
 from joblib import Parallel, delayed
+from pathlib import Path
 
 def _sample_within_region(region_mask, class_label, num_samples=1):
     '''
@@ -90,9 +91,10 @@ def _generate_points(mask, point_ratio=1e-4): # point_ratio 是点比例
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser('Dot annotation generator. 点注释生成器。')
-    parser.add_argument('-r','--root_dir', type=str, default=r"G:\py_code\pycharm_Code\WESUP-TGCN\data_glas\train",
+    parser.add_argument('-r','--root_dir', type=str, default=r"G:\dataG\CAMELYON16\training\patches_level2_Tumor_3000\train",
                         help='带掩码级注释的数据根目录的路径')
-    parser.add_argument('-p', '--point-ratio', type=float, default=3e-5,  # 参数用于控制已标记像素的百分比。default=1e-4
+    # 3e-5: avg 15.71 .  5e-5 : 21.77
+    parser.add_argument('-p', '--point-ratio', type=float, default=6e-5,  # 参数用于控制已标记像素的百分比。default=1e-4
                         help='Percentage of labeled objects (regions) for each class')  # 每个类标记对象(区域)的百分比
     args = parser.parse_args()     # 最后调用parse_args()方法进行解析；
 
@@ -100,7 +102,7 @@ if __name__ == '__main__':
         print('数据地址不存在')
         sys.exit(1)
 
-    mask_dir = os.path.join(args.root_dir, 'masks')
+    mask_dir = os.path.join(args.root_dir, 'labelcol')
     if not os.path.exists(mask_dir):
         print('没有masks无法生成点注释。')
         sys.exit(1)
@@ -116,6 +118,8 @@ if __name__ == '__main__':
     def para_func(fname):
         basename = os.path.splitext(fname)[0]
         mask = np.array(Image.open(os.path.join(mask_dir, fname)))  # 读取 mask 并转换成array
+        mask[mask < 127] = 0
+        mask[mask >= 127] = 1
         #生成点
         points = _generate_points(mask, point_ratio=args.point_ratio)
 
@@ -130,7 +134,8 @@ if __name__ == '__main__':
 
         return len(points)
 
-    executor = Parallel(n_jobs=os.cpu_count())  # 并行化计算
+    print(os.cpu_count())
+    executor = Parallel(12)  # 并行化计算
     # 对mask_dir中的每个图像mask,进行para_func函数.
     points_nums = executor(    delayed(para_func)(fname) for fname in tqdm(os.listdir(mask_dir) )   )
     print(f'Average number of points: {np.mean(points_nums)}.')

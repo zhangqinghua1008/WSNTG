@@ -129,7 +129,7 @@ class BaseTrainer(ABC):
         """
         pass
 
-    def load_checkpoint(self, ckpt_path=None):
+    def load_checkpoint(self, ckpt_path=None,model_type = None):
         """Load checkpointed model weights, optimizer states, etc, from given path.
             从给定路径加载 检查点模型权重、优化器状态等。
         Args:
@@ -151,7 +151,7 @@ class BaseTrainer(ABC):
                 self.scheduler.load_state_dict(
                     checkpoint['scheduler_state_dict'])
         else:
-            self.record_dir = Path(record.prepare_record_dir())
+            self.record_dir = Path(record.prepare_record_dir(model_type))
             record.copy_source_files(self.record_dir)
 
     def save_checkpoint(self, ckpt_path, **kwargs):
@@ -188,24 +188,15 @@ class BaseTrainer(ABC):
         with torch.set_grad_enabled(phase == 'train'):
             pred = self.model(input_)
             if phase == 'train':
-                # loss = self.compute_loss(pred, target, metrics=metrics)
-                loss,gcn_loss,art_gcn_loss = self.compute_loss(pred, target, metrics=metrics)
+                loss = self.compute_loss(pred, target, metrics=metrics)
 
                 if torch.isnan(loss):
                     raise ValueError('Loss is nan!')
 
                 metrics['loss'] = loss.item()
-                if torch.is_tensor(gcn_loss):
-                    metrics['gcn_loss'] = gcn_loss.item()
-                else:
-                    metrics['gcn_loss'] = gcn_loss
-                # 手工特征
-                if torch.is_tensor(art_gcn_loss):
-                    metrics['art_gcn_loss'] = art_gcn_loss.item()
-                else:
-                    metrics['art_gcn_loss'] = art_gcn_loss
 
-                accum_steps = 1  # 梯度累加的量
+                # 梯度累加
+                accum_steps = 1    # 梯度累加的量
                 loss = loss / accum_steps
                 loss.backward()
                 if (index+1) % accum_steps == 0:
@@ -215,7 +206,7 @@ class BaseTrainer(ABC):
         pred, target = self.postprocess(pred, target)  # 后处理
 
         # 看index 保存
-        if index%50==0:
+        if phase=='train' and index%5==0:
             record.save_preAndMask(self.record_dir,pred, target, index)  # 保存模型中间输出
         # 先执行self.evaluate(pred, target),然后把返回的参数 和 现有的metrics 进行合并, 进而传给step
         self.tracker.step({**metrics, **self.evaluate(pred, target)})
@@ -242,7 +233,7 @@ class BaseTrainer(ABC):
 
             # self.dataloaders[phase]  = self.dataloaders['train'] or self.dataloaders['val']
             pbar = tqdm(self.dataloaders[phase])
-            for index,data in enumerate(pbar):   # 训练前这个地方需要加载，很慢，而且占用内存很多
+            for index,data in enumerate(pbar):   # TODO: 训练前这个地方需要加载，很慢，而且占用内存很多
                 try:
                     metrics = self.train_one_iteration(index, phase, *data)
                     pbar.set_postfix(metrics)  # 在进度条上输出loss等信息
@@ -255,7 +246,7 @@ class BaseTrainer(ABC):
             pbar.close()      # 关闭进度条实例
 
     # 开始训练过程 ★★★★★
-    def train(self, data_root, **kwargs):
+    def train(self, data_root,model_type, **kwargs):
         """Start training process.  开始培训过程 ★★★★★
         Args:
             data_root: path to dataset, should contain a subdirectory named 'train'
@@ -271,7 +262,7 @@ class BaseTrainer(ABC):
         self.kwargs = {**self.kwargs, **kwargs}  # Merge configurations. 合并配置
 
         self.optimizer, self.scheduler = self.get_default_optimizer()
-        self.load_checkpoint(self.kwargs.get('checkpoint'))  # checkpoint 一般为Nne
+        self.load_checkpoint(self.kwargs.get('checkpoint'),model_type=model_type)  # checkpoint 一般为Nne
         self.logger.addHandler(logging.FileHandler(self.record_dir / 'train.log'))   # 将文件handler添加到logger
         serializable_kwargs = {                 # serializable 可串行化的
             k: v for k, v in self.kwargs.items()
@@ -286,7 +277,7 @@ class BaseTrainer(ABC):
         train_path = data_root / 'train'  # 拼接
         val_path = data_root / 'val'
 
-        # 加载train数据
+        # 加载数据: 加载train数据
         train_dataset = self.get_default_dataset(train_path,
                                                  proportion=self.kwargs.get('proportion', 1))
         train_dataset.summary(logger=self.logger)  # 使用logger记录数据集信息
@@ -302,7 +293,7 @@ class BaseTrainer(ABC):
             val_dataset = self.get_default_dataset(val_path, train=False)
             val_dataset.summary(logger=self.logger)
             self.dataloaders['val'] = torch.utils.data.DataLoader(
-                val_dataset, batch_size=1,
+                val_dataset, batch_size=max(self.kwargs.get('batch_size')//2,1),
                 num_workers=os.cpu_count())
 
         self.logger.info(underline('\nTraining Stage', '='))
@@ -313,6 +304,15 @@ class BaseTrainer(ABC):
 
         for epoch in range(self.initial_epoch, total_epochs + 1):
             self.logger.info( underline('\nEpoch {}/{}'.format(epoch, total_epochs), '-') )
+
+            # 等backbone恰当了再开启GCN
+            # if epoch >= 1 and 'is_gcn' in self.kwargs:
+            #     self.kwargs['is_gcn'] = True
+
+            # 等backbone恰当了再去标签传播
+            if epoch>=6 and 'is_propagated' in self.kwargs:
+                self.kwargs['is_propagated'] = True
+
 
             self.tracker.start_new_epoch(self.optimizer.param_groups[0]['lr'])
             self.train_one_epoch(no_val=(not val_path.exists()))

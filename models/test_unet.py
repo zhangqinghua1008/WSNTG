@@ -21,7 +21,7 @@ from utils_network.data import SegmentationDataset
 from .base import BaseConfig, BaseTrainer
 
 import segmentation_models_pytorch as smp
-from model_utils.summary import summary
+from net_structure import vgg_conv,vgg_one_conv,vgg_classifier
 
 def _preprocess_superpixels(segments, mask=None, epsilon=1e-7):
     """Segment superpixels of a given image and return segment maps and their labels.
@@ -236,9 +236,13 @@ class TEST_UNET(nn.Module):
             nn.ReLU(),
             nn.Linear(1024, 1024),
             nn.ReLU(),
-            nn.Linear(1024, D),
-            nn.ReLU()
+            # nn.Linear(1024, 1024),
+            # nn.ReLU()
         )
+
+        self.vgg_conv = vgg_conv()
+        self.one_conv = vgg_one_conv()
+        self.vgg_classifier = vgg_classifier()
 
         self.classifier = nn.Sequential(
             nn.Linear(D, self.kwargs.get('n_classes', 2)),
@@ -287,6 +291,10 @@ class TEST_UNET(nn.Module):
         Returns:
             pred: prediction with size (1, H, W)
         """
+        # x, sp_maps = x
+        # 测试时：
+        # sp_maps = torch.rand((101, x.size(2), x.size(3))).cuda()
+        # 训练时
         x, sp_maps = x
 
         n_superpixels, height, width = sp_maps.size()
@@ -295,8 +303,9 @@ class TEST_UNET(nn.Module):
         # extract conv feature maps and flatten 提取卷积特征图并flatten
         self.feature_maps = None
         _ = self.backbone(x)
-        # x = self.feature_maps  # size:(fm_channels_sum,H,W)
-        x = self.feature_maps[-33:-1, :, :]  # size:(32,H,W)
+        x = self.feature_maps  # size:(fm_channels_sum,H,W)
+        # x = self.feature_maps[-33:-1, :, :]  # size:(32,H,W)
+
         x = x.view(x.size(0), -1)
 
         # calculate features for each superpixel 计算每个超像素的特征
@@ -305,11 +314,22 @@ class TEST_UNET(nn.Module):
 
         # reduce superpixel feature dimensions with fully connected layers
         # 利用全连通层降低超像素特征维数
-        # x = self.fc_layers(x)
+        x = self.fc_layers(x)
         self.sp_features = x
 
+        # 降维后加VGG层
+        # [num,128] -> [num,1,128,128]
+        x = x.view((n_superpixels,32,32))
+        x = x.unsqueeze(dim=1)
+        #
+        # x = self.vgg_conv(x)
+        x = self.one_conv(x)# 用1*1卷积
+        x = x.view(x.size(0), -1)
+        self.sp_pred = self.vgg_classifier(x)
+        # ++++++++++++++++++++++++++++++++++++++++++++++
+
         # classify each superpixel  每个superpixel分类
-        self.sp_pred = self.classifier(x)
+        # self.sp_pred = self.classifier(x)
 
         # flatten sp_maps to one channel  将sp_maps Flatten到一个通道
         sp_maps = sp_maps.view(n_superpixels, height, width).argmax(dim=0)
@@ -481,4 +501,4 @@ class TEST_UNETTrainer(BaseTrainer):
 # if __name__ == '__main__':
 #     model = TEST_UNET().cuda()
 #
-#     summary( model, (3,270,270) )
+#     summary( model, (3,512,512) )

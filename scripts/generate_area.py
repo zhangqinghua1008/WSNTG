@@ -14,11 +14,11 @@ from skimage.io import imread
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser('Area information generator. 区域信息生成器。')
-    parser.add_argument('root_dir',
+    parser.add_argument('--root_dir',default=r"G:\dataG\CAMELYON16\training\patches_level2_Tumor_3000\train",
                         help='Path to data root directory with mask-level annotation. 带掩码级注释的数据根目录。')
     args = parser.parse_args()
 
-    mask_dir = os.path.join(args.root_dir, 'masks')
+    mask_dir = os.path.join(args.root_dir, 'labelcol')  # mask 地址
     if not os.path.exists(mask_dir):
         print('Cannot generate area information without masks. 不能生成没有遮罩的区域信息')
         sys.exit(1)
@@ -29,6 +29,9 @@ if __name__ == '__main__':
     for idx, img_name in pbar:
         img_path = os.path.join(mask_dir, img_name)
         img = imread(img_path)
+        if img.max()>1:
+            img[img <= 127] = 0   # 将掩码的像素从[0,255]转换为[0,1]
+            img[img > 127] = 1
         area_info.loc[idx] = [img_name, img.mean()]
 
     output_path = os.path.join(args.root_dir, 'area.csv')

@@ -5,11 +5,14 @@ import os.path as osp
 from pathlib import Path
 from itertools import product
 
+import matplotlib.pyplot as plt
 import numpy as np
 from tqdm import tqdm
 from skimage.io import imread, imsave
 from skimage.measure import label
 from joblib import Parallel, delayed
+from PIL import Image
+Image.MAX_IMAGE_PIXELS = None
 '''
     分割结果的彩图绘制在 scripts/paint_masks.py
 '''
@@ -51,6 +54,7 @@ def paint(mask):
 
 
 def paint_pred_and_gt(pred, gt):
+    Image.MAX_IMAGE_PIXELS = None
     pred, gt = label(pred), label(gt)
     new_pred = np.zeros_like(pred)
     max_id = max(pred.max(), gt.max())
@@ -59,7 +63,7 @@ def paint_pred_and_gt(pred, gt):
         pred_region = pred == pred_region_id
         matched_gts = []
 
-        for gt_region_id in range(1, gt.max() + 1):
+        for gt_region_id in tqdm( range(1, gt.max() + 1) ,total=gt.max()):
             gt_region = gt == gt_region_id
             intersect = (pred_region & gt_region).sum() / gt_region.sum()
 
@@ -77,10 +81,12 @@ def paint_pred_and_gt(pred, gt):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument('pred_path', help='Path to model predictions')
-    parser.add_argument('gt_path', help='Path to ground truth masks')
-    parser.add_argument('-m', '--model', help='Model name')
-    parser.add_argument('-o', '--output', help='Path to output directory')
+    parser.add_argument('--pred_path', default=r"D:\组会内容\实验报告\MedT\records\20220102-2109-PM_tgcn\results_0044\all_test\pos\_post",
+                        help='Path to model predictions')
+    parser.add_argument('--gt_path', default=r"D:\组会内容\data\Digestpath2019\MedT\test\all_test\pos\labelcol",
+                        help='Path to ground truth masks')
+    parser.add_argument('-m', '--model', default="tgcn", help='Model name')
+    parser.add_argument('-o', '--output',help='Path to output directory')
     args = parser.parse_args()
 
     pred_path = Path(args.pred_path)
@@ -92,12 +98,22 @@ if __name__ == '__main__':
     n_examples = len(pred_masks)
 
     print('Reading predictions and masks ...')
-    pred_list = executor(delayed(imread)(mask_path) for mask_path in pred_masks)
-    gt_list = executor(delayed(imread)(mask_path) for mask_path in gt_masks)
+    # pred_list = executor(delayed(imread)(mask_path) for mask_path in pred_masks)
+    pred_list = []
+    for mask_path in pred_masks:
+        pred_list.append( imread(mask_path) )
+    # gt_list = executor(delayed(imread)(mask_path) for mask_path in gt_masks)
+    gt_list = []
+    for mask_path in gt_masks:
+        gt_list.append( imread(mask_path) )
+
 
     print('Painting beautiful illustrations ...')
-    paintings = executor(delayed(paint_pred_and_gt)(pred, gt)
-                         for pred, gt in tqdm(zip(pred_list, gt_list), total=n_examples))
+    # paintings = executor(delayed(paint_pred_and_gt)(pred, gt)
+    #                      for pred, gt in tqdm(zip(pred_list, gt_list), total=n_examples))
+    paintings = []
+    for pred, gt in tqdm(zip(pred_list, gt_list),total=n_examples):
+        paintings.append( paint_pred_and_gt(pred, gt) )
 
     if args.output is None:
         output_dir = pred_path.parent / 'paintings'

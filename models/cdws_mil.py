@@ -13,7 +13,9 @@ class CDWSConfig(BaseConfig):
     """Configuration for CWDS-MIL model."""
 
     # Input spatial size.
-    input_size = (400, 400)
+    input_size = (256, 256)
+    batch_size = 8
+    epochs = 200
 
     # Fixed fusion weights
     fusion_weights = (0.2, 0.35, 0.45)
@@ -23,8 +25,8 @@ class CDWSConfig(BaseConfig):
     fuse_ac_weight = 10
 
     # learning rates
-    vgg_lr = 5e-5
-    side_lr = 5e-5
+    vgg_lr = 6e-4
+    side_lr = 6e-4
 
     # weight decay for optimization
     weight_decay = 5e-4
@@ -217,6 +219,7 @@ class CDWSTrainer(BaseTrainer):
             output = output.clamp(min=epsilon, max=(1 - epsilon))
             image_pred = output.mean(
                 dim=(2, 3)) ** (1 / self.kwargs.get('gmp'))  # (B, C)
+            image_pred = image_pred.clamp(min=0.0001, max=(1 - 0.0001)) # 防止越界
             return target_class * -torch.log(image_pred) + \
                 (1 - target_class) * -torch.log(1 - image_pred)
 
@@ -242,6 +245,9 @@ class CDWSTrainer(BaseTrainer):
         metrics['fuse_loss'] = fuse_loss.mean().item()
 
         loss = torch.mean(side_loss + fuse_loss)
+
+        if torch.isnan(loss):
+            print("中断一下")
 
         return loss
 

@@ -6,30 +6,30 @@
 """
 Inference module for window-based strategy.  基于窗口策略的推理模块。
 """
-
 import math
 import os
 import os.path as osp
 from itertools import product
 from pathlib import Path
-
 import numpy as np
 import torch
 import torchvision.transforms.functional as TF
-
 from tqdm import tqdm
 from PIL import Image
 from skimage.io import imread
 from skimage import measure
 from skimage import color
 import cv2
+from skimage.filters import threshold_otsu
+from skimage import io, transform
+import time
+from PIL import Image
 
 # 图像open操作
 def img_open(image,open_size):
     kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (open_size, open_size))
     image = cv2.morphologyEx(image, cv2.MORPH_OPEN, kernel)
     return image
-
 
 def preprocess(device,*data):
     return [datum.to(device) for datum in data]
@@ -112,6 +112,8 @@ def combine_patches_to_image(patches, target_height, target_width):
         overlaps += 1.
         counter += 1
 
+    patches = 1
+
     return np.squeeze(combined[..., :-1])
 
 
@@ -130,14 +132,15 @@ def predict_bigimg(trainer, img_path, patch_size, resize_size=None,device='cpu')
 
     predictions = []
 
-    for patch in tqdm(patches,ncols=50):
+    for patch in tqdm(patches,ncols=150):
         if resize_size:
             patch = resize_img(patch, (resize_size, resize_size))  # resize 成特定大小
 
         # infer 单个patch
         input_ = TF.to_tensor(Image.fromarray(patch)).to(device).unsqueeze(0)
         # prediction = model(input_)
-        input_, _ = trainer.preprocess(input_)  # w
+        input_ = trainer.preprocess(input_)  # w
+        input_ = input_[0]
         prediction = trainer.postprocess(trainer.model(input_))
         prediction = prediction.detach().cpu().numpy().astype('uint8')
 
@@ -160,7 +163,6 @@ def pixel_predict_bigimg(model, img_path, patch_size, resize_size=None,device='c
     patches = divide_image_to_patches(img, patch_size)
     predictions = []
 
-    # for patch in tqdm(patches,ncols=70):
     for patch in patches:
         if resize_size:
             patch = resize_img(patch, (resize_size, resize_size))  # resize 成特定大小
@@ -168,7 +170,7 @@ def pixel_predict_bigimg(model, img_path, patch_size, resize_size=None,device='c
         # infer 单个patch
         input_ = TF.to_tensor(Image.fromarray(patch)).to(device).unsqueeze(0)
         prediction = model(input_)
-        prediction = prediction.unsqueeze(0).detach().cpu().numpy()[..., 1]
+        prediction = prediction.unsqueeze(0).detach().cpu().numpy()[..., 1].astype(np.float16)
         # prediction = prediction.detach().cpu().numpy().astype('uint8')
 
         if resize_size:
@@ -182,7 +184,6 @@ def pixel_predict_bigimg(model, img_path, patch_size, resize_size=None,device='c
     return combine_patches_to_image(predictions, img.shape[0], img.shape[1])
 
 
-
 def save_pre(predictions, img_paths, output_dir='predictions'):
     """Save predictions to disk. 将预测(值在 0-1 之间)保存到磁盘。
 
@@ -191,7 +192,7 @@ def save_pre(predictions, img_paths, output_dir='predictions'):
         img_paths: list of paths to input images
         output_dir: path to output directory
     """
-    print(f'\nSaving prediction to {output_dir} ...')
+    # print(f'\nSaving prediction to {output_dir} ...')
 
     if not osp.exists(output_dir):
         os.mkdir(output_dir)
@@ -219,7 +220,7 @@ def save_predictions(predictions, img_paths, output_dir='predictions'):
         output_dir: path to output directory
     """
 
-    print(f'\nSaving prediction to {output_dir} ...')
+    # print(f'\nSaving prediction to {output_dir} ...')
 
     if not osp.exists(output_dir):
         os.mkdir(output_dir)
@@ -264,20 +265,20 @@ def pred_postprocess(pred, threshold=10000):
 def fast_pred_postprocess(pred, threshold=10000):
     # 先进行open操作,去掉零星点
     if pred.size < 4000 * 4000:
-        threshold = pred.size * 0.0005
-        pred = img_open(pred, open_size=3)
+        threshold = pred.size * 0.0005  # 0.05% = 0.0005
+        pred = img_open(pred, open_size=5)
     elif pred.size <10000*10000:
-        threshold = pred.size * 0.0003
-        pred = img_open(pred, open_size=6)
+        threshold = pred.size * 0.0003  # 0.03% = 0.0003
+        pred = img_open(pred, open_size=10)
     else:
         pred = img_open(pred,open_size = 30)
         regions = measure.label(pred)
         # 规避图像大小过大 域过多的情况
         # return pred
-        if( regions.max() > 50000):
+        if( regions.max() > 40000):
             return pred
-        threshold = pred.size*0.00005
-        print("超过10000，但是区域少于5w")
+        threshold = pred.size*0.0001 # 0.01% = 0.0001
+        print("超过10000，但是区域少于4w")
 
     #  快速后处理。
     regions = measure.label(pred)
@@ -300,3 +301,154 @@ def fast_pred_postprocess(pred, threshold=10000):
     new_resMatrix *= 255
     return resMatrix + new_resMatrix
 
+
+# =============================================  CAMELYON16 dataset
+
+# ====================================ostu阈值分割
+def hsv_thumbnail(slide):
+    """
+    generate a HSV thumbnail image for WSI image with downsample of 32.
+    The ratio of length and width of the image is still the same as the level 0 image.
+    :param slide: the initialized slide oject from openslide
+    :type slide: object
+    :return: hsv image
+    :rtype: array
+
+    """
+    # thumbnail = slide.get_thumbnail( (slide.dimensions[0] / 32, slide.dimensions[1] / 32) )
+
+    img_pil = Image.fromarray(slide)
+    img_pil.thumbnail((slide.shape[0] // 8, slide.shape[1] // 8))
+    thumbnail = np.array(img_pil)
+
+    hsv_image = cv2.cvtColor(thumbnail, cv2.COLOR_RGB2HSV)
+    return hsv_image
+
+def tissue_patch_threshold(img):
+    """
+    get a threshold for tissue region  获得组织区域的阈值
+
+    :param slide: img
+    :type slide: objec
+    :returns: threshold
+    :rtype: list
+
+    """
+    hsv_image = hsv_thumbnail(img)
+    h, s, v = cv2.split(hsv_image)
+    hthresh = threshold_otsu(h)
+    sthresh = threshold_otsu(s)
+    vthresh = threshold_otsu(v)
+    # be min value for v can be changed later
+    minhsv = np.array([hthresh, sthresh, 70], np.uint8)
+    maxhsv = np.array([180, 255, vthresh], np.uint8)
+    thresh = [minhsv, maxhsv]
+    return thresh
+
+
+# 通过otsu鉴定patch是否是背景
+def otsu_patch(rgb_image,thresh,resize_size):
+    rgb_array = np.array(rgb_image)
+    hsv_rgbimage = cv2.cvtColor(rgb_array, cv2.COLOR_RGB2HSV)
+
+    rgb_binary = cv2.inRange(hsv_rgbimage, thresh[0], thresh[1])
+
+    # 此时是有意义区域
+    if ( cv2.countNonZero(rgb_binary) > resize_size * resize_size * 0.1):
+        return True
+    return False
+
+
+
+def predict_bigimg_CAMELYON16(trainer, img_path, patch_size, resize_size=None,device='cpu'):
+    """Predict on a single input image.  预测单一输入图像。
+    Arguments:
+        trainer: trainer for inference
+        img_path: instance of `torch.utils.data.Dataset`
+        patch_size: patch size when feeding into network
+        device: target device
+    Returns:
+        predictions: list of model predictions of size (H, W)
+    """
+    img = imread(img_path)
+
+    # otud 阈值
+    thresh = tissue_patch_threshold(img)
+
+    patches = divide_image_to_patches(img, patch_size)
+
+    predictions = []
+
+    false_count = 0
+    true_count = 0
+
+    for patch in patches:
+        need_pre = otsu_patch(patch,thresh,resize_size)  # 如果是背景则不需要预测， 是有意义区域需要预测
+        # # 背景需要预测
+        if need_pre :
+            if resize_size:
+                patch = resize_img(patch, (resize_size, resize_size))  # resize 成特定大小
+
+            # infer 单个patch
+            input_ = TF.to_tensor(Image.fromarray(patch)).to(device).unsqueeze(0)
+            # prediction = model(input_)
+            input_ = trainer.preprocess(input_)  # w
+            input_ = input_[0]
+            prediction = trainer.postprocess(trainer.model(input_))
+            prediction = prediction.detach().cpu().numpy().astype('uint8')
+
+            if resize_size:
+                prediction = resize_mask(prediction, (1,patch_size, patch_size))  # 恢复到patch_size 大小, 此时prediction shape:(1, 512, 512),type: numpy.ndarray
+        else:
+            prediction = np.zeros((1,patch_size, patch_size))
+
+        predictions.append(prediction[..., np.newaxis])
+
+    predictions = np.concatenate(predictions)
+
+    w = img.shape[0]
+    h = img.shape[1]
+    img = ""
+
+    return combine_patches_to_image(predictions, w, h)
+
+def pixel_predict_bigimg_CAMELYON16(model, img_path, patch_size, resize_size=None,device='cpu'):
+    """
+        WESUP/tgcn 像素级推测
+    Returns:
+        predictions: list of model predictions of size (H, W)
+    """
+
+    img = imread(img_path)
+
+    # otud 阈值
+    thresh = tissue_patch_threshold(img)
+
+    patches = divide_image_to_patches(img, patch_size)
+    predictions = []
+
+    for patch in patches:
+        need_pre = otsu_patch(patch,thresh,resize_size)  # 如果是背景则不需要预测， 是有意义区域需要预测
+        # # 背景需要预测
+        if need_pre :
+            if resize_size:
+                patch = resize_img(patch, (resize_size, resize_size))  # resize 成特定大小
+
+            # infer 单个patch
+            input_ = TF.to_tensor(Image.fromarray(patch)).to(device).unsqueeze(0)
+            prediction = model(input_)
+            input_ = input_[0]
+            prediction = prediction.unsqueeze(0).detach().cpu().numpy()[..., 1].astype(np.float16)
+            # prediction = prediction.detach().cpu().numpy().astype('uint8')
+
+            if resize_size:
+                prediction = resize_mask(prediction, (1,patch_size, patch_size))  # 恢复到patch_size 大小, 此时prediction shape:(1, 512, 512),type: numpy.ndarray
+
+        else:
+            prediction = np.zeros((1,patch_size, patch_size))
+
+        predictions.append(prediction[..., np.newaxis])
+
+    predictions = np.concatenate(predictions)
+
+    return combine_patches_to_image(predictions, img.shape[0], img.shape[1])

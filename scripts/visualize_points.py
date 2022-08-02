@@ -16,7 +16,7 @@ COLORS = (
 )
 
 parser = argparse.ArgumentParser()
-parser.add_argument('--point_root', default=r'G:\py_code\pycharm_Code\WESUP——修改版本\data_glas\train\points-3e-05',
+parser.add_argument('--point_root', default=r'D:\组会内容\data\PanNuke Dataset\Fold 1\data\points-0.0001',
                     help='Path to point labels directory')
 parser.add_argument('-r', '--radius', type=int, default=5, help='圆半径')
 parser.add_argument('-o', '--output',
