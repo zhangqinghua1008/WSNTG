@@ -11,13 +11,13 @@ from torchsummary import summary
 class FCNConfig(BaseConfig):
     n_classes = 2
     # target_size = (320, 320)
-    target_size = (256, 256)
+    target_size = (512, 512)
 
-    batch_size = 16
+    batch_size = 8
 
-    lr = 8e-4  # 6e-4
+    lr = 1e-3  # 6e-4
 
-    epochs = 200
+    epochs = 400
 
     # Optimization parameters. 优化参数
     momentum = 0.9
@@ -132,7 +132,7 @@ class FCNTrainer(BaseTrainer):
             weight_decay=self.kwargs.get('weight_decay'),
         )
         scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
-            optimizer, 'min', patience=20, factor=0.5, min_lr=1e-5, verbose=True)
+            optimizer, 'min', patience=10, factor=0.5, min_lr=1e-5, verbose=True)
 
         return optimizer, scheduler
 

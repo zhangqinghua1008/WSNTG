@@ -6,7 +6,7 @@ from shutil import rmtree
 import fire
 
 from models import initialize_trainer
-from utils_network.metrics import accuracy,dice
+from utils_network.metrics import accuracy, dice, iou_score,dice_coef
 from utils_network.metrics import detection_f1,object_dice,object_hausdorff
 import  torch
 import numpy as np
@@ -21,7 +21,7 @@ def setup_seed(seed):
     random.seed(seed)
     torch.backends.cudnn.deterministic = True
 
-def fit(model='unet', **kwargs):   # model  = tgcn \ test \ wesup \ testunet \ cdws \ sizeloss \ unet \ fcn
+def fit(model='fcn', **kwargs):   # model  = tgcn \ test \ wesup \ testunet \ cdws \ sizeloss \ unet \ fcn \ UNeXt
     setup_seed(123)
 
     # Initialize logger. 初始化日志记录器。
@@ -31,7 +31,7 @@ def fit(model='unet', **kwargs):   # model  = tgcn \ test \ wesup \ testunet \ c
 
     trainer = initialize_trainer(model, logger=logger, **kwargs)
 
-    metrics_fun = [accuracy, dice ]   # 度量函数  , detection_f1, object_dice  //object_hausdorff有点慢
+    metrics_fun = [accuracy, dice, dice_coef, iou_score]  # 度量函数  , detection_f1, object_dice  //object_hausdorff有点慢
 
     try:
         # dataset_path = r"G://py_code//pycharm_Code//WESUP-TGCN//data_glas"
@@ -44,7 +44,8 @@ def fit(model='unet', **kwargs):   # model  = tgcn \ test \ wesup \ testunet \ c
         # dataset_path = r"D:\组会内容\data\SICAPV2\res\patch3"  # SICAPV2
         # dataset_path = r"G:\dataG\CAMELYON16\training\patches_level2_Tumor_4000_new"  # CAMELYON16
         # dataset_path = r"G:\dataG\CAMELYON16\training\patches_level2_Tumor_3000"  # CAMELYON16
-        dataset_path = r"D:\组会内容\data\ISIC2018\isic512Data"  # isic512
+        # dataset_path = r"D:\组会内容\data\ISIC2018\isic512DataImagesMask"  # isic512
+        dataset_path = r"D:\组会内容\data\GlaS\data_glas_Label"  # glas
         #执行训练， BaseTrainer类下的train方法
         trainer.train(dataset_path, model, metrics=metrics_fun, **kwargs)
     finally:

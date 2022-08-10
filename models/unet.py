@@ -10,15 +10,15 @@ from torchsummary import summary
 
 
 class UNETConfig(BaseConfig):
-    batch_size = 16
+    batch_size = 8
 
-    lr = 5e-4   # 6e-4
+    lr = 1e-3   # 6e-4
 
-    epochs = 200
+    epochs = 300
 
     n_classes = 2 # Number of target classes.
 
-    target_size = (256, 256)
+    target_size = (512, 512)
 
     # Optimization parameters. 优化参数
     momentum = 0.9
@@ -31,7 +31,7 @@ class UNET(nn.Module):
         super().__init__()
         # encoder_weights="imagenet"
         # self.backbone = smp.Unet(in_channels=3,classes=n_classes, encoder_name='vgg16',encoder_weights="imagenet")
-        self.backbone = smp.Unet(in_channels=3,classes=n_classes, encoder_name='vgg16',encoder_weights="imagenet")
+        self.backbone = smp.Unet(in_channels=3,classes=n_classes, encoder_name='vgg16',encoder_weights=None)
 
     def forward(self,x):
         backbone_out = self.backbone(x)
@@ -66,7 +66,6 @@ class UNETTrainer(BaseTrainer):
                                    target_size=self.kwargs.get('target_size'))
 
     def get_default_optimizer(self):
-
         optimizer = torch.optim.Adam(
             filter(lambda p: p.requires_grad, self.model.parameters()),
             lr=self.kwargs.get('lr'),

@@ -1,5 +1,5 @@
 # sys.path.append(str(Path(__file__).parent.parent.absolute()))
-
+from UNeXt import UNeXt, UNeXtConfig, UNeXtTrainer
 from .fcn import FCN32s, FCNConfig, FCNTrainer
 from .TGCN.tgcn import TGCN, TGCNConfig, TGCNTrainer,TGCNPixelInference
 from .wesup import WESUP,WESUPConfig,WESUPTrainer
@@ -53,6 +53,10 @@ def initialize_trainer(model_type, **kwargs):
         kwargs = {**SizeLossConfig().to_dict(), **kwargs}
         model = SizeLoss(**kwargs)
         trainer = SizeLossTrainer(model, **kwargs)
+    elif model_type == 'UNeXt':
+        kwargs = {**UNeXtConfig().to_dict(), **kwargs}
+        model = UNeXt()
+        trainer = UNeXtTrainer(model, **kwargs)
     else:
         raise ValueError(f'Unsupported model: {model_type}')
 

@@ -61,12 +61,12 @@ class SegmentationDataset(Dataset):
         self.root_dir = Path(root_dir).expanduser()  # root_dir: G:\py_code\pycharm_Code\WESUP-comparison-models\data_glas\train
 
         # path to original images
-        self.img_paths = sorted((self.root_dir / 'img').iterdir()) # 一个list,存放imgpath
+        self.img_paths = sorted((self.root_dir / 'images').iterdir()) # 一个list,存放imgpath
 
         # path to mask annotations (optional)
         self.mask_paths = None
-        if (self.root_dir / 'labelcol').exists():
-            self.mask_paths = sorted((self.root_dir / 'labelcol').iterdir())
+        if (self.root_dir / 'masks').exists():
+            self.mask_paths = sorted((self.root_dir / 'masks').iterdir())
 
         # 如果mask不存在mode为None，存在的话为mode or 'mask' (就是mode存在为mode，不存在为‘mask’,因为会返回第一个逻辑判断为True字符串)
         self.mode = mode or 'mask' if self.mask_paths is not None else None
@@ -122,16 +122,8 @@ class SegmentationDataset(Dataset):
         img, mask = data
 
         transformer = A.Compose([
-            A.HueSaturationValue(hue_shift_limit=10, sat_shift_limit=10,  # 随机色调、饱和度、值变化。
-                                 val_shift_limit=10, p=1),
-            A.RandomBrightnessContrast(brightness_limit=0.1,  # 随机亮度对比度
-                                       contrast_limit=0.1, p=1),
-            A.CLAHE(p=0.5),
-            A.ElasticTransform(p=0.5), # 随机对图像进行弹性变换
-            A.Blur(blur_limit=3, p=0.5), # 运动模糊
-            A.HorizontalFlip(p=0.5),   # 垂直翻转
-            A.VerticalFlip(p=0.5),     # 水平翻转
-            A.ShiftScaleRotate(p=0.8), # 平移缩放旋转
+            A.RandomRotate90(),
+            A.transforms.Flip(),
         ])
 
         # print("img.shape", img.shape,  "mask: ", mask.shape)
@@ -171,9 +163,9 @@ class SegmentationDataset(Dataset):
             # mask[mask <= 127] = 0  # 将掩码的像素从[0,255]转换为[0,1]。
             # mask[mask > 127] = 1
 
-            mask[mask < 1] = 0  # camelyon16 专用
-            mask[mask >= 1] = 1
-        img, mask = self._resize_image_and_mask(img, mask)
+        # 如果大小不一样就resize
+        if img.shape[:2] != self.target_size or mask.shape[:2] != self.target_size:
+            img, mask = self._resize_image_and_mask(img, mask)
 
         if self.train:
             img, mask = self._augment(img, mask)  # 进行数据增强
