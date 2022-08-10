@@ -192,15 +192,16 @@ class BaseTrainer(ABC):
 
                 if torch.isnan(loss):
                     raise ValueError('Loss is nan!')
+
                 metrics['loss'] = loss.item()
 
                 # 梯度累加
-                # accum_steps = 1  # 梯度累加的量
-                # loss = loss / accum_steps
+                accum_steps = 1  # 梯度累加的量
+                loss = loss / accum_steps
                 loss.backward()
-                # if (index + 1) % accum_steps == 0:
-                self.optimizer.step()
-                self.optimizer.zero_grad()
+                if (index + 1) % accum_steps == 0:
+                    self.optimizer.step()
+                    self.optimizer.zero_grad()
 
         pred, target = self.postprocess(pred, target)  # 后处理
 
@@ -225,11 +226,13 @@ class BaseTrainer(ABC):
             if phase == 'train':
                 self.model.train()
                 self.tracker.train()
+            # val阶段
             else:
                 self.model.eval()
                 self.tracker.eval()
 
-            pbar = tqdm(self.dataloaders[phase], total=len(self.dataloaders[phase]))
+            # self.dataloaders[phase]  = self.dataloaders['train'] or self.dataloaders['val']
+            pbar = tqdm(self.dataloaders[phase])
             for index, data in enumerate(pbar):  # TODO: 训练前这个地方需要加载，很慢，而且占用内存很多
                 try:
                     metrics = self.train_one_iteration(index, phase, *data)
@@ -282,8 +285,7 @@ class BaseTrainer(ABC):
             self.logger.info(underline('\nEpoch {}/{}'.format(epoch, total_epochs), '-'))
 
             # WSNTG 开启标签传播
-            if model_type == "TGCN":
-                self.openPropagated(epoch)
+            self.openPropagated(epoch)
 
             self.tracker.start_new_epoch(self.optimizer.param_groups[0]['lr'])
             self.train_one_epoch(no_val=(not val_path.exists()))
@@ -292,16 +294,13 @@ class BaseTrainer(ABC):
             self.tracker.save()  # 保存度量到CSV文件
             record.plot_learning_curves(self.tracker.save_path)  # 保存学习曲线
 
-            # 保存检查点以便恢复训练
-            if epoch%10==0:
-                ckpt_path = self.record_dir / 'checkpoints' / f'ckpt.{epoch:04d}.pth'
-                self.save_checkpoint(ckpt_path, epoch=epoch, optimizer_state_dict=self.optimizer.state_dict())
+            # save checkpoints for resuming training  保存检查点以便恢复训练
+            ckpt_path = self.record_dir / 'checkpoints' / f'ckpt.{epoch:04d}.pth'
+            self.save_checkpoint(ckpt_path, epoch=epoch, optimizer_state_dict=self.optimizer.state_dict())
 
             # 删除以前的检查点
             # for ckpt_path in sorted((self.record_dir / 'checkpoints').glob('*.pth'))[:-1]:
             #     os.remove(ckpt_path)
-
-            torch.cuda.empty_cache()
 
         self.logger.info(self.tracker.report())
 
@@ -328,7 +327,7 @@ class BaseTrainer(ABC):
             val_dataset = self.get_default_dataset(val_path, train=False)
             val_dataset.summary(logger=self.logger)
             self.dataloaders['val'] = torch.utils.data.DataLoader(
-                val_dataset, batch_size=self.kwargs.get('batch_size'),
+                val_dataset, batch_size=max(self.kwargs.get('batch_size') // 2, 1),
                 num_workers=os.cpu_count())
         return val_path
 
