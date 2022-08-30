@@ -1,15 +1,13 @@
 # sys.path.append(str(Path(__file__).parent.parent.absolute()))
-from UNeXt import UNeXt, UNeXtConfig, UNeXtTrainer
+from .unext import UNeXt, UNeXtConfig, UNeXtTrainer
 from .fcn import FCN32s, FCNConfig, FCNTrainer
-from .TGCN.tgcn import TGCN, TGCNConfig, TGCNTrainer,TGCNPixelInference
-from .wesup import WESUP,WESUPConfig,WESUPTrainer
+from .TGCN.tgcn import TGCN, TGCNConfig, TGCNTrainer, TGCNPixelInference
+from .wesup import WESUP, WESUPConfig, WESUPTrainer
 from .cdws_mil import CDWS, CDWSConfig, CDWSTrainer
 from .test_unet import TEST_UNET,TEST_UNETConfig,TEST_UNETTrainer
 from .sizeloss import SizeLoss, SizeLossConfig, SizeLossTrainer
-from .unet import UNET,UNETTrainer,UNETConfig
-from .Yamu import YAMU,YAMUConfig,YAMUTrainer
-# from .hovernet.test_hover import Test_HoverNet,Test_HoverNetTrainer,Test_HoverNetConfig
-# from .test_resnet18 import TEST_RESNET18Config,TEST_RESNET18Trainer,TEST_RESNET18
+from .unet import UNET, UNETTrainer, UNETConfig
+from .Yamu import YAMU, YAMUConfig, YAMUTrainer
 
 
 def initialize_trainer(model_type, **kwargs):
@@ -41,10 +39,6 @@ def initialize_trainer(model_type, **kwargs):
         kwargs = {**YAMUConfig().to_dict(), **kwargs}
         model = YAMU(2)
         trainer = YAMUTrainer(model, **kwargs)
-    elif model_type == 'testunet':
-        kwargs = {**TEST_UNETConfig().to_dict(), **kwargs}
-        model = TEST_UNET(**kwargs)
-        trainer = TEST_UNETTrainer(model, **kwargs)
     elif model_type == 'cdws':
         kwargs = {**CDWSConfig().to_dict(), **kwargs}
         model = CDWS(**kwargs)
@@ -53,7 +47,7 @@ def initialize_trainer(model_type, **kwargs):
         kwargs = {**SizeLossConfig().to_dict(), **kwargs}
         model = SizeLoss(**kwargs)
         trainer = SizeLossTrainer(model, **kwargs)
-    elif model_type == 'UNeXt':
+    elif model_type == 'unext':
         kwargs = {**UNeXtConfig().to_dict(), **kwargs}
         model = UNeXt()
         trainer = UNeXtTrainer(model, **kwargs)

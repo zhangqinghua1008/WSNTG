@@ -4,41 +4,37 @@ Utilities for recording multiple runs of experiments. 用于记录多次试验�
 
 import glob
 import json
-import os
 from datetime import datetime
 from pathlib import Path
 from shutil import copyfile, copytree, rmtree
-
 import matplotlib
 import matplotlib.pyplot as plt
 import pandas as pd
-
-import skimage.io as io
 import torch
 from torchvision import utils as vutils
 
 matplotlib.use('Agg')
+
 
 def chk_mkdir(dir_path):
     """ Creates folders if they do not exist. """
     if not dir_path.exists():
         dir_path.mkdir()
 
+
 # 主备记录路径
 def prepare_record_dir(model_type):
     """Create new record directory and return its path. 创建新的记录目录并返回其路径 """
 
-    # record_root = Path('D:/组会内容/实验报告/MedT') / 'records'/'1-fast_test'  #存放recoder的地址
     if model_type == 'tgcn' or model_type == 'wesup':
-        record_root = Path('D:/组会内容/实验报告/MedT') / 'records_16/records'  # 存放recoder的地址
+        record_root = Path('E:/records')  # 存放recoder的地址
     else:
-        record_root = Path('D:/组会内容/实验报告/MedT') / 'records_16/records' / '0对比算法'  #存放recoder的地址
-        # record_root = Path('D:/组会内容/实验报告/MedT') / 'records_SICAPV2' / '0对比算法'  #存放recoder的地址
+        record_root = Path('E:/records') / '0对比算法'  # 存放recoder的地址
 
     if not record_root.exists():
         record_root.mkdir()
 
-    record_dir = record_root / ( datetime.now().strftime('%Y%m%d-%H%M-%p')+"_"+model_type )  # %H 24小时制
+    record_dir = record_root / (datetime.now().strftime('%Y%m%d-%H%M-%p') + "_" + model_type)  # %H 24小时制
 
     if not record_dir.exists():
         record_dir.mkdir()
@@ -120,7 +116,8 @@ def plot_learning_curves(history_path):
         plt.savefig(curves_dir / f'{key}.png')
         plt.close()
 
-def save_preAndMask(record_dir, pred, target ,index):
+
+def save_preAndMask(record_dir, pred, target, index):
     """ 保存模型pre 和 对应的mask  """
     img_dir = record_dir / 'pre_output'
 
@@ -129,5 +126,5 @@ def save_preAndMask(record_dir, pred, target ,index):
 
     pred_save = pred[0].clone().detach().to(torch.device('cpu')).float()
     target_save = target[0].clone().detach().to(torch.device('cpu')).float()
-    vutils.save_image(pred_save, Path.joinpath(img_dir,str(index) + ".png"))
-    vutils.save_image(target_save, Path.joinpath(img_dir,str(index) + "_mask.png"))
+    vutils.save_image(pred_save, Path.joinpath(img_dir, str(index) + ".png"))
+    vutils.save_image(target_save, Path.joinpath(img_dir, str(index) + "_mask.png"))

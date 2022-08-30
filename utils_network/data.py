@@ -1,7 +1,6 @@
 """
 Data loading utilities. 数据加载工具
 """
-
 import csv
 from functools import partial
 from pathlib import Path
@@ -17,8 +16,8 @@ from skimage.morphology import dilation
 from skimage.segmentation import find_boundaries
 from skimage.transform import resize
 from torch.utils.data import Dataset
-import matplotlib.pyplot as plt
 import matplotlib
+
 matplotlib.use('TkAgg')
 
 empty_tensor = torch.tensor(0)
@@ -58,10 +57,11 @@ class SegmentationDataset(Dataset):
             seed: random seed
         """
 
-        self.root_dir = Path(root_dir).expanduser()  # root_dir: G:\py_code\pycharm_Code\WESUP-comparison-models\data_glas\train
+        self.root_dir = Path(
+            root_dir).expanduser()  # root_dir: G:\py_code\pycharm_Code\WESUP-comparison-models\data_glas\train
 
         # path to original images
-        self.img_paths = sorted((self.root_dir / 'images').iterdir()) # 一个list,存放imgpath
+        self.img_paths = sorted((self.root_dir / 'images').iterdir())  # 一个list,存放imgpath
 
         # path to mask annotations (optional)
         self.mask_paths = None
@@ -71,7 +71,7 @@ class SegmentationDataset(Dataset):
         # 如果mask不存在mode为None，存在的话为mode or 'mask' (就是mode存在为mode，不存在为‘mask’,因为会返回第一个逻辑判断为True字符串)
         self.mode = mode or 'mask' if self.mask_paths is not None else None
 
-        if self.mode != 'mask' and contour: # 需要轮廓 但 没有mask
+        if self.mode != 'mask' and contour:  # 需要轮廓 但 没有mask
             raise ValueError('mask is required for providing contours/ 需要mask来提供轮廓')
 
         self.contour = contour
@@ -98,7 +98,7 @@ class SegmentationDataset(Dataset):
         height, width = img.shape[:2]
         if self.target_size is not None:
             target_height, target_width = self.target_size
-        elif self.multiscale_range is not None:   # 一般执行这个条件
+        elif self.multiscale_range is not None:  # 一般执行这个条件
             self.rescale_factor = np.random.uniform(*self.multiscale_range)  # rescale_factor:缩放随机数。
             target_height = int(np.ceil(self.rescale_factor * height))
             target_width = int(np.ceil(self.rescale_factor * width))
@@ -156,12 +156,12 @@ class SegmentationDataset(Dataset):
                2. 对读取到的数据进行数据增强
                3. 返回数据对 （一般我们要返回 图片，对应的标签）'''
         idx = self.picked[idx]
-        img = imread(str(self.img_paths[idx]))[:,:,:3]  # 防止png四通道的情况
+        img = imread(str(self.img_paths[idx]))[:, :, :3]  # 防止png四通道的情况
         mask = None
         if self.mask_paths is not None:
             mask = imread(str(self.mask_paths[idx]))
             # mask[mask <= 127] = 0  # 将掩码的像素从[0,255]转换为[0,1]。
-            # mask[mask > 127] = 1
+            mask[mask >= 1] = 1
 
         # 如果大小不一样就resize
         if img.shape[:2] != self.target_size or mask.shape[:2] != self.target_size:
@@ -359,7 +359,7 @@ class PointSupervisionDataset(SegmentationDataset):
         if self.rescale_factor is None:
             rescaler = np.array([
                 [self.target_size[1] / orig_width,
-                    self.target_size[0] / orig_height, 1]
+                 self.target_size[0] / orig_height, 1]
             ])
         else:  # 缩放因子存在走这个条件(一般走这个条件)
             rescaler = np.array(
@@ -371,15 +371,15 @@ class PointSupervisionDataset(SegmentationDataset):
                                for point in csv.reader(fp)])
             points = np.floor(points * rescaler).astype('int')
 
-        if self.train:  #训练数据进行数据增强
+        if self.train:  # 训练数据进行数据增强
             img, pixel_mask, points = self._augment(img, pixel_mask, points)
 
-        point_mask = np.zeros((self.n_classes, *img.shape[:2]), dtype='uint8') # shape: (class,缩放后宽,缩放后高)
+        point_mask = np.zeros((self.n_classes, *img.shape[:2]), dtype='uint8')  # shape: (class,缩放后宽,缩放后高)
         for x, y, class_ in points:
             cv2.circle(point_mask[class_], (x, y), self.radius, 1, -1)  # 画圆，根据点坐标生成对应的mask,将点位置半径内的值改为1。 半径为0时候，当前点为1
 
         if point_mask is not None:
-            point_mask = torch.as_tensor( point_mask.astype('int64'), dtype=torch.long)
+            point_mask = torch.as_tensor(point_mask.astype('int64'), dtype=torch.long)
         else:
             point_mask = empty_tensor
 
@@ -482,7 +482,7 @@ class Digest2019PointDataset(SegmentationDataset):
             if not is_negative:
                 pixel_mask = imread(str(self.mask_paths[idx]))
             else:
-                pixel_mask = np.full_like(img.shape,0)
+                pixel_mask = np.full_like(img.shape, 0)
 
         orig_height, orig_width = img.shape[:2]
         img, pixel_mask = self._resize_image_and_mask(img, pixel_mask)
@@ -492,7 +492,7 @@ class Digest2019PointDataset(SegmentationDataset):
         if self.rescale_factor is None:
             rescaler = np.array([
                 [self.target_size[1] / orig_width,
-                    self.target_size[0] / orig_height, 1]
+                 self.target_size[0] / orig_height, 1]
             ])
         else:
             rescaler = np.array(
@@ -519,7 +519,7 @@ class Digest2019PointDataset(SegmentationDataset):
             point_mask = np.zeros(
                 (self.n_classes, *img.shape[-2:]), dtype='uint8')
             for x, y, class_ in points:
-                if class_>1:
+                if class_ > 1:
                     class_ = 1
                 cv2.circle(point_mask[class_], (x, y), self.radius, 1, -1)
 
@@ -616,7 +616,7 @@ class PointSupervisionDataset_Edit(SegmentationDataset):
         if self.rescale_factor is None:
             rescaler = np.array([
                 [self.target_size[1] / orig_width,
-                    self.target_size[0] / orig_height, 1]
+                 self.target_size[0] / orig_height, 1]
             ])
         else:
             rescaler = np.array(
@@ -628,7 +628,7 @@ class PointSupervisionDataset_Edit(SegmentationDataset):
                                for point in csv.reader(fp)])
             points = np.floor(points * rescaler).astype('int')
 
-        if self.train:  #训练数据进行数据增强
+        if self.train:  # 训练数据进行数据增强
             img, pixel_mask, points = self._augment(img, pixel_mask, points)
 
         point_mask = np.zeros((self.n_classes, *img.shape[:2]), dtype='uint8')
@@ -636,7 +636,7 @@ class PointSupervisionDataset_Edit(SegmentationDataset):
             cv2.circle(point_mask[class_], (x, y), self.radius, 1, -1)
 
         if point_mask is not None:
-            point_mask = torch.as_tensor( point_mask.astype('int64'), dtype=torch.long)
+            point_mask = torch.as_tensor(point_mask.astype('int64'), dtype=torch.long)
         else:
             point_mask = empty_tensor
 
