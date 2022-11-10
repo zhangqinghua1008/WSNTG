@@ -6,7 +6,7 @@ from infer_test_tile_utils import *
 from models import initialize_trainer
 from performance_metrics import *
 from models.wesup import WESUPPixelInference
-from models.TGCN.tgcn import TGCNPixelInference
+from models.WSNTG.tgcn import TGCNPixelInference
 from PIL import Image
 Image.MAX_IMAGE_PIXELS = None
 """

@@ -155,11 +155,10 @@ class BaseTrainer(ABC):
             record.copy_source_files(self.record_dir)
 
     def save_checkpoint(self, ckpt_path, **kwargs):
-        """Save model checkpoint.
+        """ 保存模型检查点
         Args:
             ckpt_path: path to checkpoint to be saved
-            kwargs: additional information to be included in the checkpoint object
-                    要包含在检查点对象中的附加信息
+            **kwargs: 要包含在检查点对象中的附加信息
         """
         checkpoint = {
             'model_state_dict': self.model.state_dict(),
@@ -181,15 +180,17 @@ class BaseTrainer(ABC):
         # 预处理，在相应的模型py文件中执行
         input_, target = self.preprocess(*data)
 
-        # self.optimizer.zero_grad()
         metrics = dict()
 
         # .set_grad_enabled(Bool): 将梯度计算设置成打开或者关闭的上下文管理器.
         with torch.set_grad_enabled(phase == 'train'):
+            # 模型的预测
             pred = self.model(input_)
             if phase == 'train':
+                # 计算loss
                 loss = self.compute_loss(pred, target, metrics=metrics)
 
+                # 如果loss为nan，报错
                 if torch.isnan(loss):
                     raise ValueError('Loss is nan!')
                 metrics['loss'] = loss.item()
@@ -197,25 +198,27 @@ class BaseTrainer(ABC):
                 # 梯度累加
                 # accum_steps = 1  # 梯度累加的量
                 # loss = loss / accum_steps
+
                 loss.backward()
-                # if (index + 1) % accum_steps == 0:
+
+                # if (index + 1) % accum_steps == 0: # 累加到一定的论文再进行反向传播
                 self.optimizer.step()
                 self.optimizer.zero_grad()
 
         pred, target = self.postprocess(pred, target)  # 后处理
 
-        # 看index 保存
+        # 保存部分模型训练时预测图
         if phase == 'train' and index % 5 == 0:
             record.save_preAndMask(self.record_dir, pred, target, index)  # 保存模型中间输出
         # 先执行self.evaluate(pred, target),然后把返回的参数 和 现有的metrics 进行合并, 进而传给step
         self.tracker.step({**metrics, **self.evaluate(pred, target)})
         return metrics
 
-    # 1.epoch
+    # 1.每个epoch 需要执行的内容
     def train_one_epoch(self, no_val=False):
         """Hook for training one epoch.  Hook为训练一个epoch
         Args:
-            no_val: whether to disable validation 是否禁用验证
+            no_val: 是否禁用验证
         """
         phases = ['train'] if no_val else ['train', 'val']
         for phase in phases:  # 依次执行训练和val 阶段
@@ -232,6 +235,7 @@ class BaseTrainer(ABC):
             pbar = tqdm(self.dataloaders[phase], total=len(self.dataloaders[phase]))
             for index, data in enumerate(pbar):  # TODO: 训练前这个地方需要加载，很慢，而且占用内存很多
                 try:
+                    # 训练一个迭代-iteration
                     metrics = self.train_one_iteration(index, phase, *data)
                     pbar.set_postfix(metrics)  # 在进度条上输出loss等信息
                 except RuntimeError as ex:
@@ -246,20 +250,18 @@ class BaseTrainer(ABC):
     def train(self, data_root, model_type, **kwargs):
         """Start training process.  开始培训过程 ★★★★★
         Args:
-            data_root: path to dataset, should contain a subdirectory named 'train'
-                (and optionally 'val')  应该包含一个名为“train”的子目录（ 可选'val'）
+            data_root:  应该包含一个名为“train”的子目录（ 可选'val'）
         Kwargs (optional):
-            metrics: a list of functions for computing metrics  用于计算指标的函数列表
+            metrics: 用于计算指标的函数列表
             checkpoint: path to checkpoint for resuming training
             epochs: number of epochs for training
             batch_size: mini-batch size for training
-            proportion: proportion of training data to be used 使用的训练数据的比例
         """
 
-        self.kwargs = {**self.kwargs, **kwargs}  # Merge configurations. 合并配置
+        self.kwargs = {**self.kwargs, **kwargs}  # 合并配置
 
         self.optimizer, self.scheduler = self.get_default_optimizer()
-        self.load_checkpoint(self.kwargs.get('checkpoint'), model_type=model_type)  # checkpoint 一般为Nne
+        self.load_checkpoint(self.kwargs.get('checkpoint'), model_type=model_type)  # 从头训练的话，checkpoint 为Npne
         self.logger.addHandler(logging.FileHandler(self.record_dir / 'train.log'))  # 将文件handler添加到logger
         serializable_kwargs = {  # serializable 可串行化的
             k: v for k, v in self.kwargs.items()
@@ -278,6 +280,7 @@ class BaseTrainer(ABC):
         epochs = self.kwargs.get('epochs')
         total_epochs = epochs + self.initial_epoch - 1
 
+        # 进行n轮训练
         for epoch in range(self.initial_epoch, total_epochs + 1):
             self.logger.info(underline('\nEpoch {}/{}'.format(epoch, total_epochs), '-'))
 
@@ -285,6 +288,7 @@ class BaseTrainer(ABC):
             if model_type == "TGCN":
                 self.openPropagated(epoch)
 
+            # 记录进行一轮训练
             self.tracker.start_new_epoch(self.optimizer.param_groups[0]['lr'])
             self.train_one_epoch(no_val=(not val_path.exists()))
             self.post_epoch_hook(epoch)
@@ -296,10 +300,6 @@ class BaseTrainer(ABC):
             if epoch%10==0:
                 ckpt_path = self.record_dir / 'checkpoints' / f'ckpt.{epoch:04d}.pth'
                 self.save_checkpoint(ckpt_path, epoch=epoch, optimizer_state_dict=self.optimizer.state_dict())
-
-            # 删除以前的检查点
-            # for ckpt_path in sorted((self.record_dir / 'checkpoints').glob('*.pth'))[:-1]:
-            #     os.remove(ckpt_path)
 
             torch.cuda.empty_cache()
 

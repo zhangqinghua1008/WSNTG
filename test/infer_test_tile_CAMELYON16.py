@@ -6,7 +6,7 @@ from infer_test_tile_utils import *
 from models import initialize_trainer
 from performance_metrics import *
 from models.wesup import WESUPPixelInference
-from models.TGCN.tgcn import TGCNPixelInference
+from models.WSNTG.tgcn import TGCNPixelInference
 from PIL import Image
 import cv2 as cv2
 from skimage import io as skio

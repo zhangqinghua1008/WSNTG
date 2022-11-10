@@ -1,7 +1,7 @@
 # sys.path.append(str(Path(__file__).parent.parent.absolute()))
 from UNeXt import UNeXt, UNeXtConfig, UNeXtTrainer
 from .fcn import FCN32s, FCNConfig, FCNTrainer
-from .TGCN.tgcn import TGCN, TGCNConfig, TGCNTrainer,TGCNPixelInference
+from WSNTG.wsntg import WSNTG, WSNTGConfig, WSNTGTrainer,WSNTGPixelInference
 from .wesup import WESUP,WESUPConfig,WESUPTrainer
 from .cdws_mil import CDWS, CDWSConfig, CDWSTrainer
 from .test_unet import TEST_UNET,TEST_UNETConfig,TEST_UNETTrainer
@@ -21,10 +21,10 @@ def initialize_trainer(model_type, **kwargs):
         model: a model instance with given type  具有给定类型的模型实例
     """
 
-    if model_type == 'tgcn':
-        kwargs = {**TGCNConfig().to_dict(), **kwargs}
-        model = TGCN(**kwargs)
-        trainer = TGCNTrainer(model, **kwargs)
+    if model_type == 'WSNTG':
+        kwargs = {**WSNTGConfig().to_dict(), **kwargs}
+        model = WSNTG(**kwargs)
+        trainer = WSNTGTrainer(model, **kwargs)
     elif model_type == 'wesup':
         kwargs = {**WESUPConfig().to_dict(), **kwargs}
         model = WESUP(**kwargs)
