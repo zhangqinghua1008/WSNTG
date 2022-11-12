@@ -48,18 +48,16 @@ def infer(trainer, data_dir, resize_size=None, device='cuda', output_dir=None, p
 #             if output_dir is not None:
 #                 save_pre(pre, img_path, output_dir / "_pre")
 
-def infer_run_SIC(model_type = None,checkpoint = None):
+
+# 执行模型正常推理
+def infer_run(model_type=None, checkpoint=None):
     begin = time.time()
-    patch_size = 512
-    resize_size = 256  # None
+    resize_size = 512  # None
 
     output_dir = checkpoint.parent.parent / ('results_' + checkpoint.stem)
     output_dir.mkdir(exist_ok=True)
 
-    # 10张图快速测试
-    data_dir = Path(r"D:\组会内容\data\SICAPV2\res\patch3\test/")
-    output_dir = output_dir
-    output_dir.mkdir(exist_ok=True)
+    data_dir = Path(r"D:\组会内容\data\LUSC\test/")
 
     # 加载模型并推理
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
@@ -68,31 +66,28 @@ def infer_run_SIC(model_type = None,checkpoint = None):
         trainer.load_checkpoint(checkpoint)
 
     # 推理
-    phase_data_dir = data_dir
-    phase_output_dir = output_dir
-    phase_output_dir.mkdir(exist_ok=True)
+    print("\n++++++++++++++++++++ 当前正在处理：")
 
-    infer(trainer,phase_data_dir,patch_size = patch_size ,output_dir=phase_output_dir,resize_size=resize_size,device=device)
+    infer(trainer, data_dir, output_dir=output_dir, resize_size=resize_size, device=device)
     print("\ncheckpoint:", checkpoint, "\n")
     # 评价模型输出
-    phase_lable_dir = phase_data_dir / "labelcol"  # GT 地址
-    evaluate_img(modelPre_dir=phase_output_dir, gt_lable_dir=phase_lable_dir, need_post=True)
+    phase_lable_dir = data_dir / "masks"  # GT 地址
+    evaluate_img(modelPre_dir=output_dir, gt_lable_dir=phase_lable_dir, need_post=True)
     print("时间：", time.time() - begin)
 
 
 # 执行像素级别推理
-def infer_pixel_run_SIC(model_type = 'tgcn',checkpoint = None):
+def infer_pixel_run(model_type='WSGNet', checkpoint=None):
     '''
         model_type : wesup / tgcn
     '''
     begin = time.time()
-    patch_size = 512
-    resize_size = 256  # None
+    resize_size = 400
 
     output_dir = checkpoint.parent.parent / ('results_' + checkpoint.stem[-4:])
     output_dir.mkdir(exist_ok=True)
 
-    data_dir = Path(r"D:\组会内容\data\SICAPV2\res\patch3\test/") # 测试集地址
+    data_dir = Path(r"D:\组会内容\data\LUSC\test/")
     output_dir = output_dir
     output_dir.mkdir(exist_ok=True)
 
@@ -106,31 +101,26 @@ def infer_pixel_run_SIC(model_type = 'tgcn',checkpoint = None):
         model.load_state_dict(torch.load(checkpoint)['model_state_dict'])
 
     # 推理
-    phase_data_dir = data_dir
-    phase_output_dir = output_dir
-    phase_output_dir.mkdir(exist_ok=True)
-    pixel_infer(model, phase_data_dir, patch_size=patch_size, output_dir=phase_output_dir, resize_size=resize_size,
-                device=device)
+    print("\n++++++++++++++++++++ 当前正在处理：")
+    infer(model, data_dir, output_dir=output_dir, resize_size=resize_size, device=device, pixel=True)
 
     print("\ncheckpoint:", checkpoint, "\n")
     # 评价模型输出
-    phase_lable_dir = phase_data_dir / "labelcol"  # GT 地址
-    evaluate_img(modelPre_dir=phase_output_dir, gt_lable_dir=phase_lable_dir, need_post=True)
+    lable_dir = data_dir / "masks"  # GT 地址
+    evaluate_img(modelPre_dir=output_dir, gt_lable_dir=lable_dir, need_post=True)
     print("时间：", time.time() - begin)
 
 
 if __name__ == '__main__':
+    model_type = "unet"  # sizeloss || unet / fcn / cdws / WSGNet  / yamu
 
-    model_type = "yamu"     # sizeloss || unet / fcn / cdws / sizeloss / tgcn /wesup /yamu
-
-    ckpts = ["ckpt.0100.pth","ckpt.0106.pth"]
+    ckpts = ["ckpt.0200.pth"]
     for ckpt in ckpts:
-        checkpoint = Path(r"D:\组会内容\实验报告\MedT\records_SICAPV2\0对比算法\20220622-1634-PM_yamu")
+        checkpoint = Path(r"E:\records\LUSC\0对比算法\20221107-1313-PM_unet") / "checkpoints" / ckpt
 
-        checkpoint =  checkpoint / "checkpoints" / ckpt
-        if model_type == "tgcn" or model_type == "wesup":
+        if model_type == "WSGNet" or model_type == "wesup":
             # 执行像素级别推理
-            infer_pixel_run_SIC(model_type=model_type,checkpoint=checkpoint)
+            infer_pixel_run(model_type=model_type, checkpoint=checkpoint)
         else:
             # 正常模型推理
-            infer_run_SIC(model_type=model_type,checkpoint=checkpoint)
+            infer_run(model_type=model_type, checkpoint=checkpoint)

@@ -4,7 +4,6 @@ from .fcn import FCN32s, FCNConfig, FCNTrainer
 from .TGCN.tgcn import TGCN, TGCNConfig, TGCNTrainer
 from .wesup import WESUP, WESUPConfig, WESUPTrainer
 from .cdws_mil import CDWS, CDWSConfig, CDWSTrainer
-from .test_unet import TEST_UNET,TEST_UNETConfig,TEST_UNETTrainer
 from .sizeloss import SizeLoss, SizeLossConfig, SizeLossTrainer
 from .unet import UNET, UNETTrainer, UNETConfig
 from .Yamu import YAMU, YAMUConfig, YAMUTrainer
