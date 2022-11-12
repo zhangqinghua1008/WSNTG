@@ -123,12 +123,17 @@ def run_post(pre_dir,post_dir):
     print("post地址：", post_dir)
     post_dir = Path(post_dir)
     post_dir.mkdir(exist_ok=True)
+    plt_dir = post_dir.parent / (post_dir.stem + "-plt")
+    plt_dir.mkdir(exist_ok=True)
 
     def fun(fire):
         Image.MAX_IMAGE_PIXELS = None
         pred = io.imread(fire)
         post = fast_pred_postprocess(pred,pred.size*0.0005)
         print('%-6s' % fire.name, end="-> ")
+
+        # 绘制紫色图片
+        plt.imsave(plt_dir / fire.name, post)
 
         post = Image.fromarray(np.uint8(post))
         post.save(post_dir/ fire.name)

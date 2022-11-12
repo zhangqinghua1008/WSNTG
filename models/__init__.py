@@ -1,13 +1,14 @@
 # sys.path.append(str(Path(__file__).parent.parent.absolute()))
 from .unext import UNeXt, UNeXtConfig, UNeXtTrainer
 from .fcn import FCN32s, FCNConfig, FCNTrainer
-from .TGCN.tgcn import TGCN, TGCNConfig, TGCNTrainer, TGCNPixelInference
+from .TGCN.tgcn import TGCN, TGCNConfig, TGCNTrainer
 from .wesup import WESUP, WESUPConfig, WESUPTrainer
 from .cdws_mil import CDWS, CDWSConfig, CDWSTrainer
 from .test_unet import TEST_UNET,TEST_UNETConfig,TEST_UNETTrainer
 from .sizeloss import SizeLoss, SizeLossConfig, SizeLossTrainer
 from .unet import UNET, UNETTrainer, UNETConfig
 from .Yamu import YAMU, YAMUConfig, YAMUTrainer
+from .WSGNet import WSGNet, WSGNetConfig, WSGNetTrainer
 
 
 def initialize_trainer(model_type, **kwargs):
@@ -23,6 +24,10 @@ def initialize_trainer(model_type, **kwargs):
         kwargs = {**TGCNConfig().to_dict(), **kwargs}
         model = TGCN(**kwargs)
         trainer = TGCNTrainer(model, **kwargs)
+    elif model_type == 'wsgsn':
+        kwargs = {**WSGNetConfig().to_dict(), **kwargs}
+        model = WSGNet(**kwargs)
+        trainer = WSGNetTrainer(model, **kwargs)
     elif model_type == 'wesup':
         kwargs = {**WESUPConfig().to_dict(), **kwargs}
         model = WESUP(**kwargs)

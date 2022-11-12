@@ -1,6 +1,6 @@
 import numpy as np
 from utils_network.data import SegmentationDataset
-from base import BaseConfig, BaseTrainer
+from .base import BaseConfig, BaseTrainer
 import torch
 import torch.nn as nn
 import torch.nn.functional as F

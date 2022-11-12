@@ -6,6 +6,8 @@ from functools import partial
 from pathlib import Path
 
 import albumentations as A
+from albumentations import RandomRotate90, Resize
+from albumentations.augmentations import transforms
 import cv2
 import numpy as np
 import pandas as pd
@@ -115,15 +117,24 @@ class SegmentationDataset(Dataset):
             mask = resize_mask(mask, (target_height, target_width))
             # mask = resize_mask(mask, (270, 270))
 
+
         return img, mask
 
     # augment： 增强
-    def _augment(self, *data):
+    def _augment(self, *data, train=True):
         img, mask = data
 
         transformer = A.Compose([
-            A.RandomRotate90(),
-            A.transforms.Flip(),
+            A.HueSaturationValue(hue_shift_limit=10, sat_shift_limit=10,  # 随机色调、饱和度、值变化。
+                                 val_shift_limit=10, p=1),
+            A.RandomBrightnessContrast(brightness_limit=0.1,  # 随机亮度对比度
+                                       contrast_limit=0.1, p=1),
+            A.CLAHE(p=0.5),
+            A.ElasticTransform(p=0.5), # 随机对图像进行弹性变换
+            A.Blur(blur_limit=3, p=0.5), # 运动模糊
+            A.HorizontalFlip(p=0.5),   # 垂直翻转
+            A.VerticalFlip(p=0.5),     # 水平翻转
+            A.ShiftScaleRotate(p=0.8), # 平移缩放旋转
         ])
 
         # print("img.shape", img.shape,  "mask: ", mask.shape)
@@ -160,8 +171,12 @@ class SegmentationDataset(Dataset):
         mask = None
         if self.mask_paths is not None:
             mask = imread(str(self.mask_paths[idx]))
-            # mask[mask <= 127] = 0  # 将掩码的像素从[0,255]转换为[0,1]。
-            mask[mask >= 1] = 1
+            if np.max(mask) == 255:
+                mask[mask <= 127] = 0  # 将掩码的像素从[0,255]转换为[0,1]。
+                mask[mask >= 127] = 1
+            else:
+                mask[mask < 1] = 0
+                mask[mask >= 1] = 1
 
         # 如果大小不一样就resize
         if img.shape[:2] != self.target_size or mask.shape[:2] != self.target_size:
@@ -185,6 +200,133 @@ class SegmentationDataset(Dataset):
         else:
             lines.append("No supervision provided.")
 
+        lines = '\n'.join(lines)
+
+        # 记录信息到logger
+        if logger is not None:
+            logger.info(lines)
+        else:
+            print(lines)
+
+
+class FullSegmentationDataset(Dataset):
+    """  用于全监督的分割任务的数据集！！！
+
+     This dataset returns following data when indexing: 此数据集在索引时返回以下数据:
+         - img: tensor of size (3, H, W) with type float32
+         - mask: tensor of size (C, H, W) with type long or an empty tensor
+         - cont (optional): tensor of size (C, H, W) with type long, only when `contour` is `True`
+     """
+
+    def __init__(self, root_dir, target_size=None, train=True, n_classes=2):
+        """
+        Args:
+            root_dir: path to dataset root  数据集根的路径
+            target_size: desired output spatial size
+            train: whether in training mode
+            n_classes: number of target classes
+            seed: random seed
+        """
+
+        self.root_dir = Path(root_dir).expanduser()  # root_dir: \WESUP-comparison-models\data_glas\train
+
+        # path to original images
+        self.img_paths = sorted((self.root_dir / 'images').iterdir())  # 一个list,存放imgpath
+
+        # path to mask annotations (optional)
+        self.mask_paths = None
+        if (self.root_dir / 'masks').exists():
+            self.mask_paths = sorted((self.root_dir / 'masks').iterdir())
+
+        self.target_size = target_size
+
+        self.train = train
+        self.n_classes = n_classes
+
+        # indexes to pick image/mask from  从中选择图像/掩码的索引
+        self.picked = np.arange(len(self.img_paths))  # 【0，img的个数），都是整数，后续被挑选的数据
+
+    def __len__(self):
+        return int(len(self.img_paths))
+
+    def _resize_image_and_mask(self, img, mask=None):
+        height, width = img.shape[:2]
+        if self.target_size is not None:
+            target_height, target_width = self.target_size
+        else:
+            target_height, target_width = height, width
+
+        img = resize_img(img, (target_height, target_width))
+
+        if mask is not None:
+            mask = resize_mask(mask, (target_height, target_width))
+
+        return img, mask
+
+    # augment： 增强
+    def _augment(self, *data):
+        img, mask = data
+
+        if self.train:
+            transformer = A.Compose([
+                A.RandomRotate90(),
+                transforms.Flip(),
+                Resize(self.target_size[0],self.target_size[1]),
+                transforms.Normalize(),
+            ])
+        else:
+            transformer = A.Compose([
+                Resize(self.target_size[0],self.target_size[1]),
+                transforms.Normalize(),
+            ])
+
+        augmented = transformer(image=img, mask=mask)
+        return augmented['image'], augmented.get('mask')
+
+    # 转变image and mask为tensor
+    def _convert_image_and_mask_to_tensor(self, img, mask):
+        img = img.astype('float32') / 255
+        img = img.transpose(2, 0, 1)
+        # if np.max(mask) == 255:
+        mask = mask.astype('float32') / 255
+
+        # img = TF.to_tensor(img)
+        if mask is not None:
+            mask = np.concatenate([np.expand_dims(mask == i, 0) for i in range(self.n_classes)])
+            mask = torch.as_tensor(mask.astype('float32'), dtype=torch.float32)
+        else:
+            mask = empty_tensor
+
+        return img, mask
+
+    def __getitem__(self, idx):
+        """    1. 按照 index，读取文件中对应的数据  （读取一个数据！！！！我们常读取的数据是图片，一般我们送入模型的数据成批的，但在这里只是读取一张图片，成批后面会说到）
+               2. 对读取到的数据进行数据增强
+               3. 返回数据对 （一般我们要返回 图片，对应的标签） """
+        idx = self.picked[idx]
+        img = imread(str(self.img_paths[idx]))[:, :, :3]  # 防止png四通道的情况
+        img = resize_img(img, (512, 512))
+        # mask = imread(str(self.mask_paths[idx]))
+        mask = imread(str(self.mask_paths[idx]), cv2.IMREAD_GRAYSCALE)
+
+        # if np.max(mask) == 255:
+        #     mask[mask <= 127] = 0  # 将掩码的像素从[0,255]转换为[0,1]。
+        #     mask[mask >= 127] = 1
+        mask[mask < 1] = 0
+        mask[mask >= 1] = 255
+        mask = resize_mask(mask, (512, 512))
+        mask[mask < 127] = 0
+        mask[mask >= 127] = 255
+
+        img, mask = self._augment(img, mask)  # 进行数据增强
+
+        return self._convert_image_and_mask_to_tensor(img, mask)
+
+    def summary(self, logger=None):
+        """ 打印摘要信息."""
+        lines = [f"Segmentation dataset ({'training' if self.train else 'inference'}) ",
+                 f"initialized with {len(self)} images from {self.root_dir}.",
+                 f"Supervision mode: Mask - Full"]
         lines = '\n'.join(lines)
 
         # 记录信息到logger
@@ -257,8 +399,9 @@ class AreaConstraintDataset(SegmentationDataset):
         mask = None
         if self.mask_paths is not None:
             mask = imread(str(self.mask_paths[idx]))
-            mask[mask <= 127] = 0  # 将掩码的像素从[0,255]转换为[0,1]。
-            mask[mask > 127] = 1
+            if np.max(mask) == 255:
+                mask[mask < 127] = 0  # 将掩码的像素从[0,255]转换为[0,1]。
+                mask[mask >= 127] = 1
         img, mask = self._resize_image_and_mask(img, mask)
 
         if self.train:

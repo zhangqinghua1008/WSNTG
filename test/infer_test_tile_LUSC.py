@@ -2,48 +2,58 @@ import argparse
 import lib
 import torch
 from pathlib import Path
-from infer_test_tile_utils import *
 from models import initialize_trainer
 from performance_metrics import *
 from models.wesup import WESUPPixelInference
 from models.TGCN.tgcn import TGCNPixelInference
+from models.WSGNet import WSGNetPixelInference
 from PIL import Image
+
+from infer_utils import *
+
 Image.MAX_IMAGE_PIXELS = None
 """
     Inference module for window-based strategy.  基于窗口滑动的推理模块。
 """
 
-def infer(trainer,data_dir,patch_size,resize_size=None,device='cuda',output_dir=None):
+
+def infer(trainer, data_dir, resize_size=None, device='cuda', output_dir=None, pixel=False):
     data_dir = Path(data_dir)
-    img_paths = list((data_dir / 'img').iterdir())
+    img_paths = list((data_dir / 'images').iterdir())
     print(f'Predicting {len(img_paths)} images from {data_dir} ...')
 
     trainer.model.eval()
-    for img_path in tqdm(img_paths,ncols=50):
-        pre = predict_bigimg(trainer, img_path, patch_size, resize_size=resize_size,device=device)
+    # with torch.no_grad():
+    for img_path in tqdm(img_paths, ncols=len(img_paths)):
+        # 像素级推理
+        if pixel:
+            pre = pixel_predict_img(trainer, img_path, resize_size=resize_size, device=device)
+        else:
+            pre = predict_img(trainer, img_path, resize_size=resize_size, device=device)
 
         if output_dir is not None:
             save_pre(pre, img_path, output_dir / "_pre")
 
+
 # 像素级别推理
-def pixel_infer(model,data_dir,patch_size,resize_size=None,device='cuda',output_dir=None):
-    data_dir = Path(data_dir)
-    img_paths = list((data_dir / 'img').iterdir())
-    print(f'像素级 Predicting {len(img_paths)} images from {data_dir} ...')
-
-    with torch.no_grad():
-        for img_path in tqdm(img_paths):
-            pre = pixel_predict_bigimg(model, img_path, patch_size, resize_size=resize_size,device=device)
-
-            if output_dir is not None:
-                save_pre(pre, img_path, output_dir / "_pre")
+# def pixel_infer(trainer, data_dir, resize_size=None, device='cuda', output_dir=None):
+#     data_dir = Path(data_dir)
+#     img_paths = list((data_dir / 'images').iterdir())
+#     print(f'像素级 Predicting {len(img_paths)} images from {data_dir} ...')
+#
+#     with torch.no_grad():
+#         for img_path in tqdm(img_paths, ncols=len(img_paths)):
+#
+#
+#             if output_dir is not None:
+#                 save_pre(pre, img_path, output_dir / "_pre")
 
 def infer_run_SIC(model_type = None,checkpoint = None):
     begin = time.time()
     patch_size = 512
     resize_size = 256  # None
 
-    output_dir = checkpoint.parent.parent / 'results'
+    output_dir = checkpoint.parent.parent / ('results_' + checkpoint.stem)
     output_dir.mkdir(exist_ok=True)
 
     # 10张图快速测试
@@ -79,7 +89,7 @@ def infer_pixel_run_SIC(model_type = 'tgcn',checkpoint = None):
     patch_size = 512
     resize_size = 256  # None
 
-    output_dir = checkpoint.parent.parent / ('results_'+checkpoint.stem[-4:])
+    output_dir = checkpoint.parent.parent / ('results_' + checkpoint.stem[-4:])
     output_dir.mkdir(exist_ok=True)
 
     data_dir = Path(r"D:\组会内容\data\SICAPV2\res\patch3\test/") # 测试集地址
@@ -90,8 +100,8 @@ def infer_pixel_run_SIC(model_type = 'tgcn',checkpoint = None):
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
     if model_type == 'wesup':
         model = WESUPPixelInference().to(device)
-    elif model_type == 'tgcn':
-        model = TGCNPixelInference().to(device)
+    elif model_type == 'WSGNet':
+        model = WSGNetPixelInference().to(device)
     if checkpoint is not None:
         model.load_state_dict(torch.load(checkpoint)['model_state_dict'])
 

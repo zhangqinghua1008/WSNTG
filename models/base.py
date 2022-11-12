@@ -1,5 +1,4 @@
 import logging
-import os
 import time
 from abc import ABC, abstractmethod
 from collections import defaultdict
@@ -7,6 +6,7 @@ from pathlib import Path
 
 import numpy as np
 import torch
+import torch.backends.cudnn as cudnn
 from tqdm import tqdm
 
 from utils_network import underline, record
@@ -180,10 +180,7 @@ class BaseTrainer(ABC):
         """
         # 预处理，在相应的模型py文件中执行
         input_, target = self.preprocess(*data)
-
-        # self.optimizer.zero_grad()
         metrics = dict()
-
         # .set_grad_enabled(Bool): 将梯度计算设置成打开或者关闭的上下文管理器.
         with torch.set_grad_enabled(phase == 'train'):
             pred = self.model(input_)
@@ -202,7 +199,7 @@ class BaseTrainer(ABC):
                 self.optimizer.step()
                 self.optimizer.zero_grad()
 
-        pred, target = self.postprocess(pred, target)  # 后处理
+        pred, target = self.postprocess(pred, target)  # 每个模型的后处理
 
         # 看index 保存
         if phase == 'train' and index % 5 == 0:
@@ -278,8 +275,11 @@ class BaseTrainer(ABC):
         epochs = self.kwargs.get('epochs')
         total_epochs = epochs + self.initial_epoch - 1
 
+        cudnn.benchmark = True # 加速, 适合图像size不变的情况下
+
         for epoch in range(self.initial_epoch, total_epochs + 1):
             self.logger.info(underline('\nEpoch {}/{}'.format(epoch, total_epochs), '-'))
+            startTime = time.time()
 
             # WSNTG 开启标签传播
             if model_type == "TGCN":
@@ -288,6 +288,8 @@ class BaseTrainer(ABC):
             self.tracker.start_new_epoch(self.optimizer.param_groups[0]['lr'])
             self.train_one_epoch(no_val=(not val_path.exists()))
             self.post_epoch_hook(epoch)
+
+            print("训练花费时间：", time.time() - startTime)
 
             self.tracker.save()  # 保存度量到CSV文件
             record.plot_learning_curves(self.tracker.save_path)  # 保存学习曲线
@@ -302,6 +304,7 @@ class BaseTrainer(ABC):
             #     os.remove(ckpt_path)
 
             torch.cuda.empty_cache()
+            print("花费时间：", time.time() - startTime)
 
         self.logger.info(self.tracker.report())
 
@@ -319,17 +322,15 @@ class BaseTrainer(ABC):
         train_dataset.summary(logger=self.logger)  # 使用logger记录数据集信息
         self.dataloaders = {
             'train': torch.utils.data.DataLoader(
-                train_dataset,
-                batch_size=self.kwargs.get('batch_size'),
-                shuffle=True, num_workers=os.cpu_count())
+                train_dataset, batch_size=self.kwargs.get('batch_size'), shuffle=True,
+                num_workers=4, drop_last=True)
         }
         # 加载val数据
         if val_path.exists():
             val_dataset = self.get_default_dataset(val_path, train=False)
             val_dataset.summary(logger=self.logger)
             self.dataloaders['val'] = torch.utils.data.DataLoader(
-                val_dataset, batch_size=self.kwargs.get('batch_size'),
-                num_workers=os.cpu_count())
+                val_dataset, batch_size=self.kwargs.get('batch_size'), num_workers=4)
         return val_path
 
     # 开启标配传播

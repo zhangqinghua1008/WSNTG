@@ -158,12 +158,13 @@ class WESUPConfig(BaseConfig):
     """Configuration for WESUP model. 为WESUP模型配置 """
 
     # Rescale factor to subsample input images. 重新缩放因子的子样本输入图像。
-    # rescale_factor = 0.35   #zqh DP2019
-    rescale_factor = 0.5  # SICAPV2
+    rescale_factor = 0.4  # SCRAG
+    # rescale_factor = 0.5  # Glas
 
     # multi-scale range for training  多尺度范围训练
-    # multiscale_range = (0.3, 0.4)
-    multiscale_range = (0.4, 0.6)  # DP2019
+    multiscale_range = (0.35, 0.45)  # LUSC
+    # multiscale_range = (0.2, 0.25)  # CRAG
+    # multiscale_range = (0.4, 0.6)  # GLAS
 
     # Number of target classes.
     n_classes = 2
@@ -235,13 +236,6 @@ class WESUP(nn.Module):
             nn.ReLU()
         )
 
-        # final softmax classifier
-        # self.classifier = nn.Sequential(
-        #     nn.Linear(D, D // 2),
-        #     nn.ReLU(),
-        #     nn.Linear(D // 2, self.kwargs.get('n_classes', 2)),
-        #     nn.Softmax(dim=1)
-        # )
         self.classifier = nn.Sequential(
             nn.Linear(D, self.kwargs.get('n_classes', 2)),
             nn.Softmax(dim=1)
@@ -466,7 +460,7 @@ class WESUPTrainer(BaseTrainer):
         scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
             optimizer, 'min', patience=5, factor=0.5, min_lr=1e-5, verbose=True)
 
-        return optimizer, None
+        return optimizer, scheduler
 
     # 预处理,包含超像素分割等  img(1(batch_size),3,W,H)   point_mask/pixel_mask: (1,2(类别),W,H)
     def preprocess(self, *data):

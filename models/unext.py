@@ -1,37 +1,22 @@
 import torch
 from torch import nn
-import torch
-import torchvision
-from torch import nn
-from torch.autograd import Variable
-from torch.utils.data import DataLoader
-from torchvision import transforms
-from torchvision.utils import save_image
 import torch.nn.functional as F
-import os
-import matplotlib.pyplot as plt
-from utils import *
-
-import timm
 from timm.models.layers import DropPath, to_2tuple, trunc_normal_
-import types
 import math
-from abc import ABCMeta, abstractmethod
-from mmcv.cnn import ConvModule
-import pdb
-from utils_network.data import SegmentationDataset
-from base import BaseConfig, BaseTrainer
+from utils_network.data import SegmentationDataset, FullSegmentationDataset
+from .base import BaseConfig, BaseTrainer
 import segmentation_models_pytorch as smp
 from torchsummary import summary
+import numpy as np
 
 class UNeXtConfig(BaseConfig):
-    batch_size = 16
+    batch_size = 8
 
     lr = 1e-3  # 6e-4
 
-    epochs = 200
+    epochs = 300
 
-    n_classes = 2  # Number of target classes.
+    n_classes = 1  # Number of target classes.
 
     target_size = (512, 512)
 
@@ -207,11 +192,12 @@ class OverlapPatchEmbed(nn.Module):
 class UNeXt(nn.Module):
 
     ## Conv 3 + MLP 2 + shifted MLP
-    def __init__(self, num_classes=2, input_channels=3, deep_supervision=False, img_size=512, patch_size=16, in_chans=3,
+
+    def __init__(self, num_classes=1, input_channels=3, deep_supervision=False, img_size=512, patch_size=16, in_chans=3,
                  embed_dims=[128, 160, 256],
                  num_heads=[1, 2, 4, 8], mlp_ratios=[4, 4, 4, 4], qkv_bias=False, qk_scale=None, drop_rate=0.,
                  attn_drop_rate=0., drop_path_rate=0., norm_layer=nn.LayerNorm,
-                 depths=[1, 1, 1], sr_ratios=[8, 4, 2, 1]):
+                 depths=[1, 1, 1], sr_ratios=[8, 4, 2, 1], **kwargs):
         super().__init__()
 
         self.encoder1 = nn.Conv2d(3, 16, 3, stride=1, padding=1)
@@ -268,6 +254,7 @@ class UNeXt(nn.Module):
 
         self.final = nn.Conv2d(16, num_classes, kernel_size=1)
 
+        self.soft = nn.Softmax(dim=1)
 
     def forward(self, x):
 
@@ -334,7 +321,7 @@ class UNeXt(nn.Module):
         out = torch.add(out, t1)
         out = F.relu(F.interpolate(self.decoder5(out), scale_factor=(2, 2), mode='bilinear'))
 
-        return nn.functional.softmax(self.final(out), dim=1)
+        return self.final(out)
 
 
 class BCEDiceLoss(nn.Module):
@@ -342,6 +329,8 @@ class BCEDiceLoss(nn.Module):
         super().__init__()
 
     def forward(self, input, target):
+        if target.dtype == torch.int64:
+            target = target.float()
         bce = F.binary_cross_entropy_with_logits(input, target)
         smooth = 1e-5
         input = torch.sigmoid(input)
@@ -376,19 +365,19 @@ class UNeXtTrainer(BaseTrainer):
 
     def get_default_dataset(self, root_dir, train=True, proportion=1.0):
         if train:
-            return SegmentationDataset(root_dir, target_size=self.kwargs.get('target_size'))
+            return FullSegmentationDataset(root_dir, target_size=self.kwargs.get('target_size'),
+                                           n_classes=self.kwargs.get('n_classes'))
 
-        return SegmentationDataset(root_dir, train=False,
-                                   target_size=self.kwargs.get('target_size'))
+        return FullSegmentationDataset(root_dir, train=False,
+                                       target_size=self.kwargs.get('target_size'),
+                                       n_classes=self.kwargs.get('n_classes'))
 
     def get_default_optimizer(self):
         optimizer = torch.optim.Adam(
             filter(lambda p: p.requires_grad, self.model.parameters()),
-            lr=self.kwargs.get('lr'),
-            weight_decay=self.kwargs.get('weight_decay') )
+            lr=self.kwargs.get('lr'), weight_decay=self.kwargs.get('weight_decay'))
 
-        scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
-            optimizer, T_max=self.kwargs.get('epochs'), eta_min=1e-5)
+        scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=300, eta_min=1e-5)
 
         return optimizer, scheduler
 
@@ -397,16 +386,16 @@ class UNeXtTrainer(BaseTrainer):
 
 
     def compute_loss(self, pred, target, metrics=None):
-        pred = torch.clamp(pred, min=1e-7, max=1 - 1e-7)
+        # pred = torch.clamp(pred, min=1e-7, max=1 - 1e-7)
         criterion = BCEDiceLoss().cuda()
         return criterion(pred, target)
-        # return torch.mean(target.float() * -torch.log(pred))
 
     def postprocess(self, pred, target=None):
-        pred = pred.round()[:, 1, ...].long()
+        # pred = pred.round()[:, 1, ...].long()
+        # pred = torch.squeeze(torch.sigmoid(pred))
 
         if target is not None:
-            return pred, target.argmax(dim=1)
+            return pred, target
 
         return pred
 
@@ -416,9 +405,3 @@ class UNeXtTrainer(BaseTrainer):
 
             self.scheduler.step(loss)
 
-# if __name__ == '__main__':
-#     model = UNeXt().cuda()
-#     summary(model,(3,512,512))  # 找到8*偶数即可，比如288=8*36, 320
-
-
-# EOF

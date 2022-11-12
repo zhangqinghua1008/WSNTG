@@ -24,7 +24,9 @@ class SizeLossConfig(BaseConfig):
     constraint = 'individual'
 
     # Input spatial size.
-    input_size = (256, 256)
+    # input_size = (336, 336) # CRAG
+    input_size = (512, 512) # LUSC
+    # input_size = (512, 400) # Glas
     batch_size = 8
     epochs = 200
 

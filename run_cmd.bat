@@ -1,3 +1,3 @@
-python train.py --rescale_factor 1 --sp_area 50
-python train.py --rescale_factor 0.5 --sp_area 150
+python train.py --model fcn
+python train.py --model unet
 cmd

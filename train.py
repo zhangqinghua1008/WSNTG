@@ -21,8 +21,7 @@ def setup_seed(seed):
     torch.backends.cudnn.deterministic = True
 
 
-def fit(model='unext', **kwargs):  # model  = tgcn \ test \ wesup \ testunet \ cdws \ sizeloss \   \ fcn \ unext
-    setup_seed(123)
+def fit(model='fcn', **kwargs):  # model  = tgcn \ test \ wesup \ testunet \ cdws \ sizeloss \   \ fcn \ unext \ WSGNet
     print("model: ", model)
     # Initialize logger. 初始化日志记录器。
     logger = logging.getLogger('Train')  # 初始化变量，声明logger对象
@@ -34,7 +33,6 @@ def fit(model='unext', **kwargs):  # model  = tgcn \ test \ wesup \ testunet \ c
     metrics_fun = [accuracy, dice, dice_coef, iou_score]  # 度量函数  , detection_f1, object_dice  //object_hausdorff有点慢
 
     try:
-        # dataset_path = r"G://py_code//pycharm_Code//WESUP-TGCN//data_glas"
         # dataset_path = r"D://组会内容//data//HoVer_ConSep//consep_cut_512"
         # dataset_path = r"D://组会内容//data//HoVer_ConSep//test_debug"
         # dataset_path = r"D:\组会内容\data\Digestpath2019\MedT\fast_test_model\train_256"
@@ -43,9 +41,10 @@ def fit(model='unext', **kwargs):  # model  = tgcn \ test \ wesup \ testunet \ c
         # dataset_path = r"D:\组会内容\data\SICAPV2\res\patch3"  # SICAPV2
         # dataset_path = r"G:\dataG\CAMELYON16\training\patches_level2_Tumor_4000_new"  # CAMELYON16
         # dataset_path = r"G:\dataG\CAMELYON16\training\patches_level2_Tumor_3000"  # CAMELYON16
-        dataset_path = r"D:\组会内容\data\ISIC2018\isic512DataImagesMask"  # isic512
+        # dataset_path = r"D:\组会内容\data\ISIC2018\isic512DataImagesMask"  # isic512
         # dataset_path = r"D:\组会内容\data\GlaS\data_glas_Label"  # glas
-        # dataset_path = r"D:\组会内容\data\CRAG\CRAG"  # CRAG
+        dataset_path = r"D:\组会内容\data\CRAG\CRAG"  # CRAG
+        # dataset_path = r"D:\组会内容\data\LUSC"  # LUSC
         # 执行训练， BaseTrainer类下的train方法
         trainer.train(dataset_path, model, metrics=metrics_fun, **kwargs)
     finally:

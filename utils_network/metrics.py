@@ -289,13 +289,14 @@ def iou_score(output, target):
 
     if torch.is_tensor(output):
         # output = torch.sigmoid(output).data.cpu().numpy()
-        output = torch.argmax(output, dim=1).data.cpu().numpy()
+        output = output.data.cpu().numpy()
+        # output = torch.argmax(output, dim=1).data.cpu().numpy()
     if torch.is_tensor(target):
         target = target.data.cpu().numpy()
 
-    if target.sum()==0: # 是阴性样本 .  #反转
-       output = np.int64(output<0.5)
-       target = np.ones_like(target)
+    # if target.sum()==0: # 是阴性样本 .  #反转
+    #    output = np.int64(output<0.5)
+    #    target = np.ones_like(target)
     output_ = output > 0.5
     target_ = target > 0.5
     intersection = (output_ & target_).sum()
@@ -314,7 +315,9 @@ def dice_coef(output, target): #output为预测结果 target为真实结果
     smooth = 1e-5
 
     if torch.is_tensor(output):
-        output = torch.argmax(output, dim=1).data.cpu().numpy()
+        # output = torch.sigmoid(output).data.cpu().numpy()
+        output = output.data.cpu().numpy()
+        # output = torch.argmax(output, dim=1).data.cpu().numpy()
     if torch.is_tensor(target):
         target = target.data.cpu().numpy()
 

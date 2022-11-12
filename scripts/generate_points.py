@@ -91,10 +91,10 @@ def _generate_points(mask, point_ratio=1e-4): # point_ratio 是点比例
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser('Dot annotation generator. 点注释生成器。')
-    parser.add_argument('-r','--root_dir', type=str, default=r"G:\dataG\CAMELYON16\training\patches_level2_Tumor_3000\train",
+    parser.add_argument('-r','--root_dir', type=str, default=r"D:\组会内容\data\CRAG\CRAG\train",
                         help='带掩码级注释的数据根目录的路径')
     # 3e-5: avg 15.71 .  5e-5 : 21.77
-    parser.add_argument('-p', '--point-ratio', type=float, default=6e-5,  # 参数用于控制已标记像素的百分比。default=1e-4
+    parser.add_argument('-p', '--point-ratio', type=float, default=1e-5,  # 参数用于控制已标记像素的百分比。default=1e-4
                         help='Percentage of labeled objects (regions) for each class')  # 每个类标记对象(区域)的百分比
     args = parser.parse_args()     # 最后调用parse_args()方法进行解析；
 
@@ -102,7 +102,7 @@ if __name__ == '__main__':
         print('数据地址不存在')
         sys.exit(1)
 
-    mask_dir = os.path.join(args.root_dir, 'labelcol')
+    mask_dir = os.path.join(args.root_dir, 'masks')
     if not os.path.exists(mask_dir):
         print('没有masks无法生成点注释。')
         sys.exit(1)

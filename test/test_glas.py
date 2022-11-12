@@ -1,12 +1,18 @@
-import os
 from pathlib import Path
 
 import pandas as pd
 from joblib import Parallel, delayed
 from skimage.io import imread, imsave
+import os
+import os.path as osp
+import torchvision.transforms.functional as TF
+from tqdm import tqdm
+from PIL import Image
+from skimage.transform import resize
 
 # ========= infer 推理
 import infer
+from data import FullSegmentationDataset
 from models import initialize_trainer
 from utils_network.metrics import *
 
@@ -16,22 +22,69 @@ from utils_network.metrics import *
 
 # ========= evaluate 评估
 
-def postprocess(pred):
-    regions = label(pred)
-    for region_idx in range(regions.max() + 1):
-        region_mask = regions == region_idx
-        if region_mask.sum() < 2000:
-            pred[region_mask] = 0
+def infer(trainer, dataset, output_dir=None, num_workers=4, device='cpu'):
+    """Making inference on a directory of images with given model checkpoint.
+        对给定模型检查点的图像目录进行推理。    """
 
-    revert_regions = label(1 - pred)
-    for region_idx in range(revert_regions.max() + 1):
-        region_mask = revert_regions == region_idx
-        if region_mask.sum() < 2000:
-            pred[region_mask] = 1
+    trainer.model.eval()
 
-    return pred
+    predictions = predict(trainer, dataset, num_workers=num_workers, device=device)
+
+    if output_dir is not None:
+        save_predictions(predictions, dataset, output_dir)
+
+    return predictions
+
+
+def predict(trainer, dataset, num_workers=4, device='cpu'):
+    # 加载数据集
+    dataloader = torch.utils.data.DataLoader(dataset, batch_size=1, num_workers=num_workers)
+
+    print(f'\nPredicting {len(dataset)} images ...')
+    predictions = []
+    for data in tqdm(dataloader, total=len(dataset)):
+        img = data[0].to(device)
+
+        # infer 单个 img
+        img = trainer.preprocess(img)  # w
+        img = img[0]
+        prediction = trainer.postprocess(trainer.model(img))
+
+        # UneXt 专属
+        prediction = torch.sigmoid(prediction).squeeze(0).detach().cpu().numpy()
+        prediction[prediction >= 0.5] = 1
+        prediction[prediction < 0.5] = 0
+        predictions.append(prediction[0])
+
+    return predictions
+
+
+def save_predictions(predictions, dataset, output_dir='predictionds'):
+    """Save predictions to disk.  将预测保存到磁盘。
+    Args:
+        predictions: model predictions of size (N, H, W)
+        dataset: dataset for prediction, used for naming the prediction output
+        output_dir: path to output directory
+    """
+    print(f'\nSaving prediction to {output_dir} ...')
+
+    output_dir = Path(output_dir)
+    if not output_dir.exists():
+        output_dir.mkdir()
+
+    for pred, img_path, mask_path in tqdm(zip(predictions, dataset.img_paths, dataset.mask_paths),
+                                          total=len(predictions)):
+        pred = pred.astype('uint8')
+        Image.fromarray(pred * 255).save(output_dir / f'{img_path.stem}.png')  # 保存预测
+        # if mask_path is not None: # 保存本来mask
+        #     mask = imread(str(mask_path))
+        # Image.fromarray(mask * 255).save(output_dir / f'{mask_path.stem}.png')
+
 
 def compute_metrics(predictions, gts, pred_paths):
+    for i in range(len(gts)):
+        gts[i] = resize(gts[i], (512,512), order=1, anti_aliasing=False)
+
     iterable = list(zip(predictions, gts))
 
     executor_ac = Parallel(n_jobs=os.cpu_count())  # 并行化计算
@@ -50,14 +103,9 @@ def compute_metrics(predictions, gts, pred_paths):
     object_dices = executor_od(delayed(object_dice)(pred, gt) for pred, gt in iterable)
     print('Object Dice:', np.mean(object_dices))
 
-    # executor_of = Parallel(n_jobs=os.cpu_count())
-    # object_hausdorffs = executor_of(delayed(object_hausdorff)(pred, gt) for pred, gt in iterable)
-    # print('Object Hausdorff:', np.mean(object_hausdorffs))
-
     df = pd.DataFrame()
     df['detection_f1'] = detection_f1s
     df['object_dice'] = object_dices
-    # df['object_hausdorff'] = object_hausdorffs
     df.index = [pred_path.name for pred_path in pred_paths]
 
     return df
@@ -66,39 +114,31 @@ def compute_metrics(predictions, gts, pred_paths):
 if __name__ == '__main__':
     # infer 参数
     is_infer = True  # 是否infer,只有第一次test时infer
-    model_type = 'tgcn'
-    checkpoint = Path(r"G:\py_code\pycharm_Code\WESUP-TGCN\records\20210909-0531-PM\checkpoints\ckpt.0300.pth")
+    model_type = 'unext'
+    checkpoint = Path(r"E:\records\0对比算法\20220906-1641-PM_unext\checkpoints\ckpt.0200.pth")
     glas_root = Path(r'D:\组会内容\data\GlaS\data_glas')  # 数据地址
 
-
-    # 根据推理出的图片进行比较
-    output = checkpoint.parent / 'output'
+    # 文件夹
+    output = checkpoint.parent.parent / f'{checkpoint.name}.output'
     if not output.exists():
         output.mkdir()
     output = output / f'results_Glas'
     if not output.exists():
         output.mkdir()
 
-    pred_root =  output / 'infer'             # 保存infer的图
-    new_pred_root = output / 'evaluate-new'   #保存后处理后的预测图
+    pred_root = output / 'infer'  # 保存infer的图
     if not pred_root.exists():
         pred_root.mkdir()
         (pred_root / 'testA').mkdir()
         (pred_root / 'testB').mkdir()
-    if not new_pred_root.exists():
-        new_pred_root.mkdir()
-        (new_pred_root / 'testA').mkdir()
-        (new_pred_root / 'testB').mkdir()
 
-    phases = ['testA','testB']
-
+    phases = ['testB']
     for phase in phases:
         print('\n', phase, ' =========== ========== =========')
 
         # infer ---------
         if is_infer:
-            print('Infer ++++++++++++ \n')
-            data_dir =  glas_root / phase
+            data_dir = glas_root / phase
             infer_output_dir = pred_root / phase
 
             # 加载模型
@@ -106,27 +146,23 @@ if __name__ == '__main__':
             trainer = initialize_trainer(model_type, device=device)
             if checkpoint is not None:
                 trainer.load_checkpoint(checkpoint)
-            infer.infer(trainer, data_dir, infer_output_dir, input_size=None,
-                  scales=1, num_workers=4, device=device)
+            # 加载数据集
+            dataset = FullSegmentationDataset(data_dir, train=False, target_size=(512, 512))
+            infer(trainer, dataset, infer_output_dir, num_workers=4, device=device)
 
         # 评估 -----
         print('Evaluate ++++++++++++\n')
-        print('Reading predictions and gts ...')
-        pred_paths = sorted((pred_root / phase ).glob('*.png'))
-        # predictions = executor(delayed(postprocess)(imread(str(pred_path)) / 255) for pred_path in pred_paths)
+        pred_paths = sorted((pred_root / phase).glob('*.png'))
         predictions = []
         for pred_path in pred_paths:
-            predictions.append(postprocess(imread(str(pred_path)) / 255) )
+            predictions.append(imread(str(pred_path)) / 255)
+            # predictions.append(postprocess(imread(str(pred_path)) / 255) )
 
         executor = Parallel(n_jobs=os.cpu_count())  # 并行化计算
         gt_paths = sorted((glas_root / phase / 'masks').glob('*.bmp'))
+        # 加载数据集
+        # dataloader = torch.utils.data.DataLoader(dataset, batch_size=1, num_workers=4)
         gts = executor(delayed(imread)(gt_path) for gt_path in gt_paths)
 
-        print('保存后处理后的预测 ...')
-        for pred, pred_path in zip(predictions, pred_paths):
-            imsave(new_pred_root / phase / pred_path.name, (pred * 255).astype('uint8'))
-
         metrics = compute_metrics(predictions, gts, pred_paths)
-        metrics.to_csv(pred_root / (phase+'.csv'))
-
-
+        metrics.to_csv(pred_root / (phase + '.csv'))

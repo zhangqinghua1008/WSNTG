@@ -13,7 +13,8 @@ class CDWSConfig(BaseConfig):
     """Configuration for CWDS-MIL model."""
 
     # Input spatial size.
-    input_size = (256, 256)
+    input_size = (512, 512) #Glas、LUSC
+    # input_size = (332, 332) # CRAG
     batch_size = 8
     epochs = 200
 
@@ -25,8 +26,8 @@ class CDWSConfig(BaseConfig):
     fuse_ac_weight = 10
 
     # learning rates
-    vgg_lr = 6e-4
-    side_lr = 6e-4
+    vgg_lr = 1e-3
+    side_lr = 1e-3
 
     # weight decay for optimization
     weight_decay = 5e-4
@@ -179,7 +180,7 @@ class CDWSTrainer(BaseTrainer):
         ], lr=self.kwargs.get('vgg_lr'), weight_decay=self.kwargs.get('weight_decay'))
 
         scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
-            optimizer, 'min', patience=20, factor=0.5, min_lr=1e-5, verbose=True)
+            optimizer, 'min', patience=40, factor=0.5, min_lr=1e-5, verbose=True)
 
         return optimizer, scheduler
 
