@@ -6,7 +6,7 @@ from infer_test_tile_utils import *
 from models import initialize_trainer
 from performance_metrics import *
 from models.wesup import WESUPPixelInference
-from models.TGCN.tgcn import TGCNPixelInference
+from models.FSTGN import FSTGNPixelInference
 from PIL import Image
 import cv2 as cv2
 from skimage import io as skio
@@ -26,18 +26,12 @@ from pathlib import Path
 #from scipy.misc import imsave as saveim
 from imageio import imwrite as saveim
 
-import glob
-# before importing HDFStore, make sure 'tables' is installed by pip3 install tables
-from pandas import HDFStore
-from openslide.deepzoom import DeepZoomGenerator
-import cv2 as cv2
-from skimage import io as skio
-import xml.etree.ElementTree as et
-import math
-import os
 
 from performance_metrics_CAMELYON16 import run_performance_CAMELYON16
-
+from PIL import ImageFile
+ImageFile.LOAD_TRUNCATED_IMAGES = True
+import PIL.Image as Image
+# 解决 pillow 打开图片大于 20M 的限制
 Image.MAX_IMAGE_PIXELS = None
 """
     Inference module for window-based strategy.  基于窗口滑动的推理模块。
@@ -101,9 +95,9 @@ def pixel_infer(model,data_dir,patch_size,resize_size=None,device='cuda',output_
                 save_pre(pre, img_path, output_dir / "_pre")
 
 # 执行像素级别推理
-def infer_pixel_run_CAMELYON16(model_type = 'tgcn',checkpoint = None,data_path = ""):
+def infer_pixel_run_CAMELYON16(model_type = 'FSTGN',checkpoint = None,data_path = ""):
     '''
-        model_type : wesup / tgcn
+        model_type : wesup / FSTGN
     '''
     begin = time.time()
     patch_size = 512
@@ -121,8 +115,8 @@ def infer_pixel_run_CAMELYON16(model_type = 'tgcn',checkpoint = None,data_path =
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
     if model_type == 'wesup':
         model = WESUPPixelInference().to(device)
-    elif model_type == 'tgcn':
-        model = TGCNPixelInference().to(device)
+    elif model_type == 'FSTGN':
+        model = FSTGNPixelInference().to(device)
     if checkpoint is not None:
         model.load_state_dict(torch.load(checkpoint)['model_state_dict'])
 
@@ -138,16 +132,17 @@ def infer_pixel_run_CAMELYON16(model_type = 'tgcn',checkpoint = None,data_path =
 
 if __name__ == '__main__':
 
-    model_type = "yamu"     # sizeloss || unet / fcn / cdws / sizeloss / tgcn /wesup  1  / yamu
+    model_type = "FSTGN"     # sizeloss || unet / fcn / cdws / sizeloss / FSTGN /wesup  1  / yamu
 
-    data_folder = r"C:\DataC\CAMELYON16\level2\test"   # 测试集地址父目录  2
+    # data_folder = r"G:\dataG\CAMELYON16\training\patches_level2\test"   # 测试集地址父目录  2 #F:\data2\Camelyon16\testing\masks_level2
+    data_folder = r"C:\DataC\16\test"   # 测试集地址父目录  2 #F:\data2\Camelyon16\testing\masks_level2
 
-    ckpts = ["ckpt.0300.pth","ckpt.0200.pth"]
+    ckpts = ["ckpt.0030.pth"]
     for ckpt in ckpts:
-        checkpoint = Path(r"D:\组会内容\实验报告\MedT\records_16\records\0对比算法\20220624-1606-PM_yamu") ### 3
+        checkpoint = Path(r"D:\组会内容\实验报告\MedT\records_16\0对比算法\20221116-1648-PM_FSTGN") ### 3
 
         checkpoint =  checkpoint / "checkpoints" / ckpt
-        if model_type == "tgcn" or model_type == "wesup":
+        if model_type == "FSTGN" or model_type == "wesup":
             # 执行像素级别推理
             infer_pixel_run_CAMELYON16(model_type=model_type,checkpoint=checkpoint,data_path = data_folder)
         else:

@@ -225,7 +225,7 @@ def fun2():
 
 
 if __name__ == '__main__':
-    # generate_thumbnail()
+    generate_thumbnail()
 
     # 改变mask中为1的值
     #  change_mask()
@@ -240,4 +240,4 @@ if __name__ == '__main__':
     # copyAndremove_img_normal(r"G:\dataG\CAMELYON16\training\patches_level2_Tumor_3000\train\normal_patches_from_normal_slides")
 
     # 挑选出val集的img和mask
-    copyAndremove_img_tumor(r"G:\dataG\CAMELYON16\training\patches_level2_Tumor_3000\train")
+    # copyAndremove_img_tumor(r"G:\dataG\CAMELYON16\training\patches_level2_Tumor_3000\train")

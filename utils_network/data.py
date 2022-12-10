@@ -59,16 +59,16 @@ class SegmentationDataset(Dataset):
             seed: random seed
         """
 
-        self.root_dir = Path(
-            root_dir).expanduser()  # root_dir: G:\py_code\pycharm_Code\WESUP-comparison-models\data_glas\train
+        self.root_dir = Path( root_dir).expanduser()  # root_dir: G:\py_code\pycharm_Code\WESUP-comparison-models\data_glas\train
 
         # path to original images
-        self.img_paths = sorted((self.root_dir / 'images').iterdir())  # 一个list,存放imgpath
+        self.img_paths = sorted((self.root_dir / 'img').iterdir())  # 一个list,存放imgpath
 
         # path to mask annotations (optional)
         self.mask_paths = None
-        if (self.root_dir / 'masks').exists():
-            self.mask_paths = sorted((self.root_dir / 'masks').iterdir())
+        if (self.root_dir / 'labelcol').exists():
+            # self.mask_paths = sorted((self.root_dir / 'mask').iterdir())
+            self.mask_paths = sorted((self.root_dir / 'labelcol').iterdir())
 
         # 如果mask不存在mode为None，存在的话为mode or 'mask' (就是mode存在为mode，不存在为‘mask’,因为会返回第一个逻辑判断为True字符串)
         self.mode = mode or 'mask' if self.mask_paths is not None else None
