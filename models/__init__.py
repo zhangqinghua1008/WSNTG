@@ -1,5 +1,3 @@
-# sys.path.append(str(Path(__file__).parent.parent.absolute()))
-from UNeXt import UNeXt, UNeXtConfig, UNeXtTrainer
 from .fcn import FCN32s, FCNConfig, FCNTrainer
 from WSNTG.wsntg import WSNTG, WSNTGConfig, WSNTGTrainer,WSNTGPixelInference
 from .wesup import WESUP,WESUPConfig,WESUPTrainer
@@ -8,8 +6,6 @@ from .test_unet import TEST_UNET,TEST_UNETConfig,TEST_UNETTrainer
 from .sizeloss import SizeLoss, SizeLossConfig, SizeLossTrainer
 from .unet import UNET,UNETTrainer,UNETConfig
 from .Yamu import YAMU,YAMUConfig,YAMUTrainer
-# from .hovernet.test_hover import Test_HoverNet,Test_HoverNetTrainer,Test_HoverNetConfig
-# from .test_resnet18 import TEST_RESNET18Config,TEST_RESNET18Trainer,TEST_RESNET18
 
 
 def initialize_trainer(model_type, **kwargs):
@@ -53,10 +49,6 @@ def initialize_trainer(model_type, **kwargs):
         kwargs = {**SizeLossConfig().to_dict(), **kwargs}
         model = SizeLoss(**kwargs)
         trainer = SizeLossTrainer(model, **kwargs)
-    elif model_type == 'UNeXt':
-        kwargs = {**UNeXtConfig().to_dict(), **kwargs}
-        model = UNeXt()
-        trainer = UNeXtTrainer(model, **kwargs)
     else:
         raise ValueError(f'Unsupported model: {model_type}')
 
