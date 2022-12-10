@@ -21,6 +21,7 @@ def setup_seed(seed):
     random.seed(seed)
     torch.backends.cudnn.deterministic = True
 
+# model : 选择训练哪个模型
 def fit(model='fcn', **kwargs):   # model  = tgcn \ test \ wesup \ testunet \ cdws \ sizeloss \ unet \ fcn \ UNeXt
     setup_seed(123)
 
@@ -29,11 +30,14 @@ def fit(model='fcn', **kwargs):   # model  = tgcn \ test \ wesup \ testunet \ cd
     logger.setLevel(logging.DEBUG)              # 指定日志文件的输出级别
     logger.addHandler(logging.StreamHandler())  # 添加一个Handler. Handler基于日志级别对日志进行分发，如设置为WARNING级别的Handler只会处理WARNING及以上级别的日志。
 
+    # 初始化训练模型
     trainer = initialize_trainer(model, logger=logger, **kwargs)
 
-    metrics_fun = [accuracy, dice, dice_coef, iou_score]  # 度量函数  , detection_f1, object_dice  //object_hausdorff有点慢
+    # 设置选取什么样的度量函数
+    metrics_fun = [accuracy, dice, dice_coef, iou_score]  # 度量函数  , detection_f1, object_dice
 
     try:
+        # 数据集地址
         # dataset_path = r"G://py_code//pycharm_Code//WESUP-TGCN//data_glas"
         # dataset_path = r"D://组会内容//data//HoVer_ConSep//consep_cut_512"
         # dataset_path = r"D://组会内容//data//HoVer_ConSep//test_debug"

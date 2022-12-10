@@ -141,8 +141,8 @@ def smoothness_reg(gcn_out, adj_list):
         loss+= pre_reg
     return loss
 
-
-def tgcn_propagation(gcn_out,labeled_num, threshold=0.93):
+# 标签传播
+def WSNTG_propagation(gcn_out,labeled_num, threshold=0.93):
     '''
         gcn_out: [N_sp,2]
         y_l : [N_label_sp,2]

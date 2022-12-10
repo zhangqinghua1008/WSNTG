@@ -1,15 +1,11 @@
-# sys.path.append(str(Path(__file__).parent.parent.absolute()))
-from UNeXt import UNeXt, UNeXtConfig, UNeXtTrainer
 from .fcn import FCN32s, FCNConfig, FCNTrainer
-from .TGCN.tgcn import TGCN, TGCNConfig, TGCNTrainer,TGCNPixelInference
+from WSNTG.wsntg import WSNTG, WSNTGConfig, WSNTGTrainer,WSNTGPixelInference
 from .wesup import WESUP,WESUPConfig,WESUPTrainer
 from .cdws_mil import CDWS, CDWSConfig, CDWSTrainer
 from .test_unet import TEST_UNET,TEST_UNETConfig,TEST_UNETTrainer
 from .sizeloss import SizeLoss, SizeLossConfig, SizeLossTrainer
 from .unet import UNET,UNETTrainer,UNETConfig
 from .Yamu import YAMU,YAMUConfig,YAMUTrainer
-# from .hovernet.test_hover import Test_HoverNet,Test_HoverNetTrainer,Test_HoverNetConfig
-# from .test_resnet18 import TEST_RESNET18Config,TEST_RESNET18Trainer,TEST_RESNET18
 
 
 def initialize_trainer(model_type, **kwargs):
@@ -21,10 +17,10 @@ def initialize_trainer(model_type, **kwargs):
         model: a model instance with given type  具有给定类型的模型实例
     """
 
-    if model_type == 'tgcn':
-        kwargs = {**TGCNConfig().to_dict(), **kwargs}
-        model = TGCN(**kwargs)
-        trainer = TGCNTrainer(model, **kwargs)
+    if model_type == 'WSNTG':
+        kwargs = {**WSNTGConfig().to_dict(), **kwargs}
+        model = WSNTG(**kwargs)
+        trainer = WSNTGTrainer(model, **kwargs)
     elif model_type == 'wesup':
         kwargs = {**WESUPConfig().to_dict(), **kwargs}
         model = WESUP(**kwargs)
@@ -53,10 +49,6 @@ def initialize_trainer(model_type, **kwargs):
         kwargs = {**SizeLossConfig().to_dict(), **kwargs}
         model = SizeLoss(**kwargs)
         trainer = SizeLossTrainer(model, **kwargs)
-    elif model_type == 'UNeXt':
-        kwargs = {**UNeXtConfig().to_dict(), **kwargs}
-        model = UNeXt()
-        trainer = UNeXtTrainer(model, **kwargs)
     else:
         raise ValueError(f'Unsupported model: {model_type}')
 

@@ -26,8 +26,9 @@ def chk_mkdir(dir_path):
 
 # 主备记录路径
 def prepare_record_dir(model_type):
-    """Create new record directory and return its path. 创建新的记录目录并返回其路径 """
+    """ 创建新的记录目录并返回其路径"""
 
+    # 设置记录地址
     if model_type == 'tgcn' or model_type == 'wesup':
         record_root = Path('E:/records')  # 存放recoder的地址
     else:

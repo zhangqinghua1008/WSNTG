@@ -4,6 +4,8 @@ import glob
 import numpy as np
 import pandas as pd
 
+# 计算点标签平均数量
+
 parser = argparse.ArgumentParser()
 parser.add_argument('--points_path', default=r'G:\py_code\pycharm_Code\WESUP-TGCN\data_glas\train\points',
                     help='Path to point annotations')

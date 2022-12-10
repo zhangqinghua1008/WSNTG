@@ -6,7 +6,7 @@ from infer_test_tile_utils import *
 from models import initialize_trainer
 from performance_metrics import *
 from models.wesup import WESUPPixelInference
-from models.TGCN.tgcn import TGCNPixelInference
+from models.WSNTG.wsntg import WSNTGPixelInference
 from PIL import Image
 import cv2 as cv2
 from skimage import io as skio
@@ -122,7 +122,7 @@ def infer_pixel_run_CAMELYON16(model_type = 'tgcn',checkpoint = None,data_path =
     if model_type == 'wesup':
         model = WESUPPixelInference().to(device)
     elif model_type == 'tgcn':
-        model = TGCNPixelInference().to(device)
+        model = WSNTGPixelInference().to(device)
     if checkpoint is not None:
         model.load_state_dict(torch.load(checkpoint)['model_state_dict'])
 
