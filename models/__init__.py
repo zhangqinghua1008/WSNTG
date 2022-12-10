@@ -22,7 +22,7 @@ def initialize_trainer(model_type, **kwargs):
         kwargs = {**TGCNConfig().to_dict(), **kwargs}
         model = TGCN(**kwargs)
         trainer = TGCNTrainer(model, **kwargs)
-    elif model_type == 'WSGNet':
+    elif model_type == 'wsgsn':
         kwargs = {**WSGNetConfig().to_dict(), **kwargs}
         model = WSGNet(**kwargs)
         trainer = WSGNetTrainer(model, **kwargs)
