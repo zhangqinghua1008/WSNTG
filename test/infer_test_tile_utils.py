@@ -23,7 +23,11 @@ import cv2
 from skimage.filters import threshold_otsu
 from skimage import io, transform
 import time
-from PIL import Image
+from PIL import ImageFile
+ImageFile.LOAD_TRUNCATED_IMAGES = True
+import PIL.Image as Image
+# 解决 pillow 打开图片大于 20M 的限制
+Image.MAX_IMAGE_PIXELS = None
 
 # 图像open操作
 def img_open(image,open_size):
@@ -381,8 +385,10 @@ def predict_bigimg_CAMELYON16(trainer, img_path, patch_size, resize_size=None,de
 
     false_count = 0
     true_count = 0
-
-    for patch in patches:
+    #tqdm(patches,ncols=150)
+    # for patch in patches:
+    for patch in tqdm(patches,ncols=150):
+    # for patch in patches:
         need_pre = otsu_patch(patch,thresh,resize_size)  # 如果是背景则不需要预测， 是有意义区域需要预测
         # # 背景需要预测
         if need_pre :

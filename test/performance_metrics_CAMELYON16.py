@@ -187,14 +187,14 @@ def evaluate_By_output(modelPre_dir,gt_lable_dir):
 def run_performance_CAMELYON16(model_Pos_Pre_dir = ""):
     # ============ CAMELYON16
     model_Pos_Pre_dir = Path(model_Pos_Pre_dir)  # 模型预测输出地址
-    lable_dir = Path(r"C:\DataC\CAMELYON16\level2\test\labelcol")
+    lable_dir = Path(r"F:\data2\Camelyon16\testing\masks_level2")
 
     # evaluate_By_output(model_Pos_Pre_dir, lable_dir)
     evaluate_img(model_Pos_Pre_dir, lable_dir,need_post=False)
 
 
 if __name__ == '__main__':
-    model_Pos_Pre_dir = r"D:\组会内容\实验报告\MedT\records_16\records\20220327-2248-PM_tgcn\ckpt.0038_results/"  # 模型预测输出地址
+    model_Pos_Pre_dir = r"D:\组会内容\实验报告\MedT\records_16\0对比算法\20221116-1648-PM_WSNTG\ckpt.0030_results/"  # 模型预测输出地址
     run_performance_CAMELYON16(model_Pos_Pre_dir)  #  推测然后评测
 
 

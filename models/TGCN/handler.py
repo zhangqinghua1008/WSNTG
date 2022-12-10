@@ -109,6 +109,20 @@ def _adj(sp_features):
                                    high_features - high_features.unsqueeze(1)))
     return [adj1,adj2]
 
+def _adj(sp_features):
+    # adj.size: (N,N)
+    low_features = sp_features[:,:16]
+    # feature affinity matrix  特征关联矩阵
+    # features - features.unsqueeze(1): size(N,N,D)
+    adj1 = torch.exp(-torch.einsum('ijk,ijk->ij',    # 爱因斯坦求和 （einsum）
+                                low_features - low_features.unsqueeze(1),
+                                low_features - low_features.unsqueeze(1)))
+    high_features = sp_features[:,16:]
+    adj2 = torch.exp(-torch.einsum('ijk,ijk->ij',  # 爱因斯坦求和 （einsum）
+                                   high_features - high_features.unsqueeze(1),
+                                   high_features - high_features.unsqueeze(1)))
+    return [adj1,adj2]
+
 # 手工特征邻接矩阵
 def art_adj(art_features):
     # adj.size: (9,)

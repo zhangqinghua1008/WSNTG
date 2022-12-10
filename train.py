@@ -21,7 +21,7 @@ def setup_seed(seed):
     torch.backends.cudnn.deterministic = True
 
 
-def fit(model='fcn', **kwargs):  # model  = tgcn \ test \ wesup \ testunet \ cdws \ sizeloss \   \ fcn \ unext \ WSGNet
+def fit(model='FSTGN', **kwargs):  # model  = tgcn \ test \ wesup \ testunet \ cdws \ sizeloss \   \ fcn \ unext \ WSNTG
     print("model: ", model)
     # Initialize logger. 初始化日志记录器。
     logger = logging.getLogger('Train')  # 初始化变量，声明logger对象
@@ -37,14 +37,12 @@ def fit(model='fcn', **kwargs):  # model  = tgcn \ test \ wesup \ testunet \ cdw
         # dataset_path = r"D://组会内容//data//HoVer_ConSep//test_debug"
         # dataset_path = r"D:\组会内容\data\Digestpath2019\MedT\fast_test_model\train_256"
         # dataset_path = r"D:\组会内容\data\Digestpath2019\MedT\train\only_mask\train_800"  # 2801张patch DP2019
-        # dataset_path = r"D:\组会内容\data\Digestpath2019\MedT\train\all_foreground\patch_800"  # 5144张patch DP2019
+        dataset_path = r"D:\组会内容\data\Digestpath2019\MedT\train\all_foreground\patch_800"  # 5144张patch DP2019
         # dataset_path = r"D:\组会内容\data\SICAPV2\res\patch3"  # SICAPV2
+
         # dataset_path = r"G:\dataG\CAMELYON16\training\patches_level2_Tumor_4000_new"  # CAMELYON16
         # dataset_path = r"G:\dataG\CAMELYON16\training\patches_level2_Tumor_3000"  # CAMELYON16
-        # dataset_path = r"D:\组会内容\data\ISIC2018\isic512DataImagesMask"  # isic512
         # dataset_path = r"D:\组会内容\data\GlaS\data_glas_Label"  # glas
-        dataset_path = r"D:\组会内容\data\CRAG\CRAG"  # CRAG
-        # dataset_path = r"D:\组会内容\data\LUSC"  # LUSC
         # 执行训练， BaseTrainer类下的train方法
         trainer.train(dataset_path, model, metrics=metrics_fun, **kwargs)
     finally:

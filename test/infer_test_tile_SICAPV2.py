@@ -38,18 +38,17 @@ def pixel_infer(model,data_dir,patch_size,resize_size=None,device='cuda',output_
             if output_dir is not None:
                 save_pre(pre, img_path, output_dir / "_pre")
 
-
-# 执行模型正常推理
-def infer_run(model_type = None,checkpoint = None):
+def infer_run_SIC(model_type = None,checkpoint = None):
     begin = time.time()
-    patch_size = 800
-    resize_size = 288  # None
+    patch_size = 512
+    resize_size = 256  # None
 
     output_dir = checkpoint.parent.parent / 'results'
     output_dir.mkdir(exist_ok=True)
 
-    data_dir = Path(r"D:\组会内容\data\Digestpath2019\MedT\test\all_test\both/")
-    output_dir = output_dir / "both_test"
+    # 10张图快速测试
+    data_dir = Path(r"D:\组会内容\data\SICAPV2\res\patch3\test/")
+    output_dir = output_dir
     output_dir.mkdir(exist_ok=True)
 
     # 加载模型并推理
@@ -59,62 +58,69 @@ def infer_run(model_type = None,checkpoint = None):
         trainer.load_checkpoint(checkpoint)
 
     # 推理
-    print("\n++++++++++++++++++++ 当前正在处理：")
+    phase_data_dir = data_dir
+    phase_output_dir = output_dir
+    phase_output_dir.mkdir(exist_ok=True)
 
-    infer(trainer,data_dir,patch_size = patch_size ,output_dir=output_dir,resize_size=resize_size,device=device)
+    infer(trainer,phase_data_dir,patch_size = patch_size ,output_dir=phase_output_dir,resize_size=resize_size,device=device)
     print("\ncheckpoint:", checkpoint, "\n")
     # 评价模型输出
-    phase_lable_dir = data_dir / "labelcol"  # GT 地址
-    evaluate_img(modelPre_dir=output_dir, gt_lable_dir=phase_lable_dir, need_post=True)
+    phase_lable_dir = phase_data_dir / "labelcol"  # GT 地址
+    evaluate_img(modelPre_dir=phase_output_dir, gt_lable_dir=phase_lable_dir, need_post=True)
     print("时间：", time.time() - begin)
 
+
 # 执行像素级别推理
-def infer_pixel_run(model_type = 'FSTGN',checkpoint = None):
+def infer_pixel_run_SIC(model_type = 'tgcn',checkpoint = None):
     '''
-        model_type : wesup / FSTGN
+        model_type : wesup / tgcn / FSTGN
     '''
     begin = time.time()
-    patch_size = 800
-    resize_size = 280  # None
+    patch_size = 512
+    resize_size = 256  # None
 
     output_dir = checkpoint.parent.parent / ('results_'+checkpoint.stem[-4:])
     output_dir.mkdir(exist_ok=True)
 
-    data_dir = Path(r"D:\组会内容\data\Digestpath2019\MedT\test\all_test\both/")
-    output_dir = output_dir / "both_test"
+    data_dir = Path(r"D:\组会内容\data\SICAPV2\res\patch3\test/") # 测试集地址
+    output_dir = output_dir
     output_dir.mkdir(exist_ok=True)
 
     # 加载模型
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
-    if model_type=='wesup':
+    if model_type == 'wesup':
         model = WESUPPixelInference().to(device)
-    elif model_type=='FSTGN':
+    elif model_type == 'FSTGN':
         model = FSTGNPixelInference().to(device)
     if checkpoint is not None:
         model.load_state_dict(torch.load(checkpoint)['model_state_dict'])
 
     # 推理
-    print("\n++++++++++++++++++++ 当前正在处理：")
-    pixel_infer(model, data_dir, patch_size=patch_size, output_dir=output_dir, resize_size=resize_size,
+    phase_data_dir = data_dir
+    phase_output_dir = output_dir
+    phase_output_dir.mkdir(exist_ok=True)
+    pixel_infer(model, phase_data_dir, patch_size=patch_size, output_dir=phase_output_dir, resize_size=resize_size,
                 device=device)
 
     print("\ncheckpoint:", checkpoint, "\n")
     # 评价模型输出
-    lable_dir = data_dir / "labelcol"  # GT 地址
-    evaluate_img(modelPre_dir=output_dir, gt_lable_dir=lable_dir, need_post=True)
-    print("时间：",time.time()-begin)
+    phase_lable_dir = phase_data_dir / "labelcol"  # GT 地址
+    evaluate_img(modelPre_dir=phase_output_dir, gt_lable_dir=phase_lable_dir, need_post=True)
+    print("时间：", time.time() - begin)
 
 
 if __name__ == '__main__':
-    model_type = "FSTGN"     # sizeloss || unet / fcn / cdws / FSTGN  / yamu
 
-    ckpts = ["ckpt.0034.pth"]
+    model_type = "fcn"     # sizeloss || unet / fcn / cdws / sizeloss / tgcn /wesup /yamu  / FSTGN
+
+    ckpts = ["ckpt.0220.pth"]
     for ckpt in ckpts:
-        checkpoint = Path(r"D:\组会内容\实验报告\MedT\records\0对比算法\20221123-2104-PM_FSTGN") / "checkpoints" / ckpt
 
-        if model_type == "FSTGN" or model_type == "wesup":
+        checkpoint = Path(r"D:\组会内容\实验报告\MedT\records_SICAPV2\0对比算法\20221120-1823-PM_fcn")
+        checkpoint =  checkpoint / "checkpoints" / ckpt
+        if  model_type == "wesup" or model_type == "FSTGN":
             # 执行像素级别推理
-            infer_pixel_run(model_type=model_type,checkpoint=checkpoint)
+            infer_pixel_run_SIC(model_type=model_type,checkpoint=checkpoint)
         else:
             # 正常模型推理
-            infer_run(model_type=model_type,checkpoint=checkpoint)
+            infer_run_SIC(model_type=model_type,checkpoint=checkpoint)

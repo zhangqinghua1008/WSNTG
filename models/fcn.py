@@ -11,13 +11,14 @@ from torchsummary import summary
 class FCNConfig(BaseConfig):
     n_classes = 2
     # target_size = (320, 320)
-    target_size = (512, 512)
+    # target_size = (512, 512)
+    target_size = (256, 256) #SICAPv2
 
     batch_size = 8
 
     lr = 1e-3  # 6e-4
 
-    epochs = 400
+    epochs = 300
 
     # Optimization parameters. 优化参数
     momentum = 0.9
